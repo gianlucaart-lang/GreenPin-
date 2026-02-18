@@ -1,0 +1,7 @@
+{
+  "name": "GreenPin — Hyperlocal Civic AI",
+  "description": "A civic platform for digital post-it notes on a city map, driven by an AI engine to simulate, analyze, and connect community actions.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
