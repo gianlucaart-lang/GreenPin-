@@ -4,58 +4,63 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GP Foggia — Comunità Reale</title>
+    <title>Green Pin Foggia — Comunità Reale</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <style>
-      body {
+      html, body, #root {
         margin: 0;
+        padding: 0;
+        height: 100vh;
+        width: 100vw;
+        overflow: hidden;
+      }
+      body {
         font-family: 'Syne', sans-serif;
         background-color: #f4f0e8;
         color: #1b2e22;
-        overflow: hidden;
       }
       .font-serif-display { font-family: 'DM Serif Display', serif; }
       .font-mono-code { font-family: 'DM Mono', monospace; }
       
-      /* Logo GP Abbracciato */
+      /* Logo GP Abbracciato - Stile Apple/Human */
       .logo-gp {
         position: relative;
-        width: 44px;
+        width: 48px;
         height: 44px;
         display: flex;
         align-items: center;
         justify-content: center;
       }
       .logo-g, .logo-p {
-        width: 28px;
-        height: 28px;
-        border-radius: 10px;
+        width: 30px;
+        height: 30px;
+        border-radius: 12px;
         display: flex;
         align-items: center;
         justify-content: center;
         font-weight: 800;
-        font-size: 18px;
+        font-size: 16px;
         color: white;
         position: absolute;
-        transition: transform 0.3s ease;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       }
       .logo-g {
         background: linear-gradient(135deg, #2d6a4f, #40916c);
-        left: 0;
+        left: 2px;
         z-index: 2;
-        transform: translateX(4px);
+        transform: translateX(6px);
       }
       .logo-p {
         background: linear-gradient(135deg, #1b2e22, #2d6a4f);
-        right: 0;
+        right: 2px;
         z-index: 1;
-        transform: translateX(-4px);
+        transform: translateX(-6px);
       }
-      .logo-gp:hover .logo-g { transform: translateX(0px) rotate(-5deg); }
-      .logo-gp:hover .logo-p { transform: translateX(0px) rotate(5deg); }
+      .logo-gp:hover .logo-g { transform: translateX(0px) scale(1.05); z-index: 1; }
+      .logo-gp:hover .logo-p { transform: translateX(0px) scale(1.05); z-index: 2; }
 
       /* Animazione post-it espanso */
       @keyframes expandPostIt {
@@ -84,31 +89,19 @@
         transform: rotate(-45deg) scale(1.3);
         z-index: 1000;
       }
-      .pin-3d::after {
-        content: "";
-        width: 12px;
-        height: 12px;
-        background: rgba(0,0,0,0.1);
-        position: absolute;
-        bottom: -15px;
-        left: -15px;
-        border-radius: 50%;
-        filter: blur(2px);
-        transform: rotate(45deg);
-      }
 
       .leaflet-container {
+        height: 100% !important;
+        width: 100% !important;
         background: #eef2f3 !important;
         outline: 0;
       }
-      .leaflet-control-attribution { display: none !important; }
       
       .custom-div-icon {
         background: transparent !important;
         border: none !important;
       }
 
-      /* Scrollbar */
       ::-webkit-scrollbar { width: 4px; }
       ::-webkit-scrollbar-thumb { background: #95d5b2; border-radius: 10px; }
     </style>

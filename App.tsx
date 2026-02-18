@@ -41,7 +41,6 @@ const PostItMarker: React.FC<PostItMarkerProps> = ({ pin, onReact }) => {
   const config = PIN_CONFIG[pin.type];
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Generiamo l'HTML per il Pin 3D o il Post-it espanso
   const icon = L.divIcon({
     className: 'custom-div-icon',
     html: isExpanded ? `
@@ -78,11 +77,21 @@ const PostItMarker: React.FC<PostItMarkerProps> = ({ pin, onReact }) => {
 
 const MapController = ({ target }: { target: [number, number] | null }) => {
   const map = useMap();
+  
+  // Fix per il caricamento parziale della mappa
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [map]);
+
   useEffect(() => {
     if (target) {
       map.flyTo(target, 16, { duration: 1.5 });
     }
-  }, [target]);
+  }, [target, map]);
+  
   return null;
 };
 
@@ -129,20 +138,20 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#f4f0e8]">
-      {/* Header Soft & Premium */}
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#f4f0e8]">
+      {/* Header Premium */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-white/80 backdrop-blur-xl border-b border-gray-200 z-[1000] flex items-center justify-between px-8">
-        <div className="flex items-center gap-5">
-          {/* Logo Abbracciato */}
+        <div className="flex items-center gap-6">
+          {/* Logo Abbracciato Stile Apple */}
           <div className="logo-gp">
             <div className="logo-g">G</div>
             <div className="logo-p">P</div>
           </div>
           <div className="flex flex-col">
             <h1 className="font-serif-display text-2xl tracking-tighter text-[#1b2e22] leading-none">
-              Green <span className="text-[#2d6a4f] italic">Pin</span> Foggia
+              <span className="text-[#2d6a4f]">G</span>reen <span className="text-[#2d6a4f]">P</span>in <span className="text-gray-400 font-sans font-light ml-1">Foggia</span>
             </h1>
-            <p className="font-mono text-[9px] uppercase tracking-widest text-gray-400 mt-0.5">
+            <p className="font-mono text-[9px] uppercase tracking-widest text-gray-400 mt-1">
               Comunità Reale • Geoverificata
             </p>
           </div>
@@ -155,13 +164,13 @@ const App: React.FC = () => {
           >
             ✦ Motore AI
           </button>
-          <div className="w-10 h-10 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 cursor-pointer hover:bg-white transition-all shadow-sm">FG</div>
+          <div className="w-10 h-10 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 cursor-pointer hover:bg-white transition-all shadow-sm">FG</div>
         </div>
       </header>
 
       <div className="flex flex-1 mt-16 relative">
-        {/* Sidebar Moderna */}
-        <aside className="w-72 bg-white border-r border-gray-100 p-8 flex flex-col gap-10 z-[500] shadow-sm overflow-y-auto">
+        {/* Sidebar */}
+        <aside className="w-72 bg-white border-r border-gray-100 p-8 flex flex-col gap-10 z-[500] shadow-sm overflow-y-auto hidden lg:flex">
           <div>
             <h2 className="font-mono text-[10px] text-gray-400 uppercase tracking-[0.2em] mb-6">Naviga Segnali</h2>
             <div className="space-y-2">
@@ -186,8 +195,8 @@ const App: React.FC = () => {
           </div>
         </aside>
 
-        {/* Mappa Colorata */}
-        <main className="flex-1 relative">
+        {/* Mappa Area */}
+        <main className="flex-1 relative h-full w-full">
           <MapContainer 
             center={FOGGIA_COORDS} 
             zoom={15} 
@@ -195,7 +204,6 @@ const App: React.FC = () => {
             style={{ height: '100%', width: '100%' }}
             zoomControl={false}
           >
-            {/* TileLayer Voyager: più colorato, mostra strade, parchi e palazzi chiaramente */}
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
               attribution='&copy; OpenStreetMap contributors'
@@ -208,7 +216,7 @@ const App: React.FC = () => {
             ))}
           </MapContainer>
 
-          {/* HUD di Controllo AI fluttuante */}
+          {/* HUD fluttuante */}
           <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-3 p-3 bg-white/90 backdrop-blur-xl border border-gray-200 rounded-[2rem] shadow-2xl">
              <button 
                 onClick={handleSimulate} 
@@ -227,7 +235,7 @@ const App: React.FC = () => {
              </button>
           </div>
 
-          {/* Report Analisi */}
+          {/* Analisi report */}
           {analysis && (
             <div className="absolute top-10 left-10 w-96 bg-white border border-gray-200 rounded-[2.5rem] p-8 shadow-2xl z-[1000] animate-pop-in">
               <div className="flex justify-between items-start mb-6">
