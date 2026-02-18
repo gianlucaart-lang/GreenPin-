@@ -5,7 +5,7 @@ import L from 'leaflet';
 import { Pin, PinType } from './types';
 import { PIN_CONFIG } from './constants';
 import AIPanel from './components/AIPanel';
-import { fetchRealTimeCitySignals } from './services/geminiService';
+import { fetchRealTimeCitySignals, generateSimulatedPins } from './services/geminiService';
 import { supabase } from './services/supabaseClient';
 
 const FOGGIA_COORDS: [number, number] = [41.4622, 15.5447];
@@ -20,19 +20,25 @@ const getAuthorToken = () => {
   return token;
 };
 
+// Algoritmo migliorato per distanziare i pin sovrapposti
 const deconflictPins = (pins: Pin[]): Pin[] => {
   const coordinateMap: Record<string, number> = {};
   return pins.map(pin => {
+    // Usiamo una precisione di 5 decimali per raggruppare pin "quasi" identici
     const key = `${pin.lat.toFixed(5)},${pin.lng.toFixed(5)}`;
     const count = coordinateMap[key] || 0;
     coordinateMap[key] = count + 1;
+    
     if (count === 0) return pin;
-    const offset = 0.00006 * count;
+    
+    // Se c'è sovrapposizione, spostiamo leggermente a spirale
+    const angle = count * 0.5;
+    const offset = 0.00015 * count;
     return {
       ...pin,
-      lat: pin.lat - offset,
-      lng: pin.lng + offset,
-      rotation: (pin.rotation || 0) + (count * 2)
+      lat: pin.lat + Math.cos(angle) * offset,
+      lng: pin.lng + Math.sin(angle) * offset,
+      rotation: (pin.rotation || 0) + (count * 3)
     };
   });
 };
@@ -64,7 +70,7 @@ const PostItMarker: React.FC<{
         <div class="absolute -bottom-2 -right-2 bg-white rounded-full w-8 h-8 flex items-center justify-center text-[14px] shadow-xl border border-gray-100 cursor-pointer hover:scale-110 transition-transform">✕</div>
       </div>
     ` : `
-      <div class="pin-3d shadow-lg" style="background: ${config.color}; border: 3px solid white;">
+      <div class="pin-3d shadow-lg ${pin.authorId === 'system-ai' ? 'ring-2 ring-white ring-offset-2 animate-pulse' : ''}" style="background: ${config.color}; border: 3px solid white;">
         <span class="absolute inset-0 flex items-center justify-center text-[12px] transform rotate(45deg)">${config.emoji}</span>
       </div>
     `,
@@ -98,6 +104,7 @@ const App: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSearchingAI, setIsSearchingAI] = useState(false);
   const [syncError, setSyncError] = useState(false);
   
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -105,7 +112,7 @@ const App: React.FC = () => {
   const [formAddress, setFormAddress] = useState('');
   const [formType, setFormType] = useState<PinType>('visto');
 
-  // 1. CARICAMENTO INIZIALE E REALTIME
+  // 1. CARICAMENTO INIZIALE E REALTIME SUPABASE
   useEffect(() => {
     const fetchPins = async () => {
       setIsSyncing(true);
@@ -140,9 +147,10 @@ const App: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // 2. LIVE CITY FEED (AI)
-  useEffect(() => {
-    const loadAiSignals = async () => {
+  // 2. CARICAMENTO LIVE FEED (GEMINI SEARCH)
+  const refreshLiveFeed = useCallback(async () => {
+    setIsSearchingAI(true);
+    try {
       const liveSignals = await fetchRealTimeCitySignals();
       const mapped = liveSignals.map((s, i) => ({
         ...s,
@@ -154,9 +162,38 @@ const App: React.FC = () => {
         rotation: Math.random() * 6 - 3
       } as Pin));
       setAiPins(mapped);
-    };
-    loadAiSignals();
+    } catch (e) {
+      console.warn("Live Feed non disponibile al momento");
+    } finally {
+      setIsSearchingAI(false);
+    }
   }, []);
+
+  useEffect(() => {
+    refreshLiveFeed();
+  }, [refreshLiveFeed]);
+
+  // 3. GENERAZIONE SIMULATA DALLA CHAT
+  const handleSimulateFromChat = async (scenario: string) => {
+    setIsSearchingAI(true);
+    try {
+      const simulated = await generateSimulatedPins(scenario);
+      const mapped = simulated.map((s, i) => ({
+        ...s,
+        id: `sim-${Date.now()}-${i}`,
+        authorId: 'system-ai',
+        sentiment: 'ispirante',
+        reactions: { like: 0, heart: 0, comment: 0 },
+        tags: ["#simulazione"],
+        rotation: Math.random() * 10 - 5
+      } as Pin));
+      setAiPins(prev => [...prev, ...mapped]);
+    } catch (e) {
+      console.error("Simulation error:", e);
+    } finally {
+      setIsSearchingAI(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!formText.trim() || !formAddress.trim()) return;
@@ -168,7 +205,7 @@ const App: React.FC = () => {
       emoji: PIN_CONFIG[formType].emoji,
       text: formText,
       address: formAddress,
-      user: "Cittadino",
+      user: "Cittadino di Foggia",
       time: "adesso",
       sentiment: 'neutro',
       reactions: { like: 0, heart: 0, comment: 0 },
@@ -180,13 +217,15 @@ const App: React.FC = () => {
 
     try {
       if (editingId) {
-        await supabase.from('pins').update(pinData).eq('id', editingId);
+        const { error } = await supabase.from('pins').update(pinData).eq('id', editingId);
+        if (error) throw error;
       } else {
-        await supabase.from('pins').insert([pinData]);
+        const { error } = await supabase.from('pins').insert([pinData]);
+        if (error) throw error;
       }
       setIsModalOpen(false);
     } catch (err) {
-      alert("Errore nel salvataggio. Verifica le chiavi Supabase.");
+      alert("Errore nel salvataggio. Assicurati di aver configurato correttamente Supabase.");
     }
   };
 
@@ -202,12 +241,23 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2">
               <div className={`w-1.5 h-1.5 rounded-full ${syncError ? 'bg-red-500' : (isSyncing ? 'bg-yellow-400 animate-pulse' : 'bg-green-500')}`}></div>
               <p className="text-[7px] uppercase tracking-widest font-bold text-gray-400">
-                {syncError ? 'Errore Chiavi API' : (isSyncing ? 'Sincronizzando...' : 'Cloud Attivo')}
+                {syncError ? 'Connessione Fallita' : (isSyncing ? 'Sincronizzando...' : 'Cloud Attivo')}
               </p>
             </div>
           </div>
         </div>
-        <button onClick={() => setIsAIOpen(true)} className="bg-[#1b2e22] text-white px-5 py-2.5 rounded-full text-[9px] font-bold tracking-widest uppercase shadow-xl hover:bg-[#2d6a4f] transition-all">✦ AI Advisor</button>
+        
+        <div className="flex items-center gap-3">
+          {isSearchingAI && (
+            <div className="hidden md:flex items-center gap-2 bg-white px-3 py-1.5 rounded-full border border-[#95d5b2]/30 shadow-sm animate-pulse">
+               <span className="w-2 h-2 bg-[#2d6a4f] rounded-full"></span>
+               <span className="text-[8px] font-bold uppercase tracking-widest text-[#2d6a4f]">AI sta cercando...</span>
+            </div>
+          )}
+          <button onClick={() => setIsAIOpen(true)} className="bg-[#1b2e22] text-white px-5 py-2.5 rounded-full text-[9px] font-bold tracking-widest uppercase shadow-xl hover:bg-[#2d6a4f] transition-all flex items-center gap-2">
+            <span className="text-sm">✦</span> Chat Advisor
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 relative">
@@ -221,28 +271,30 @@ const App: React.FC = () => {
 
         {isPickerActive && (
           <div className="absolute inset-0 pointer-events-none z-[1001] flex items-center justify-center">
-             <div className="w-16 h-16 border-2 border-[#2d6a4f] rounded-full flex items-center justify-center animate-pulse"><div className="w-1 h-1 bg-[#2d6a4f] rounded-full"></div></div>
+             <div className="w-16 h-16 border-2 border-[#2d6a4f] rounded-full flex items-center justify-center animate-pulse shadow-[0_0_50px_rgba(45,106,79,0.2)]">
+               <div className="w-1 h-1 bg-[#2d6a4f] rounded-full"></div>
+             </div>
           </div>
         )}
 
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-sm">
           {!isPickerActive ? (
-            <button onClick={() => { setIsPickerActive(true); setEditingId(null); setFormText(''); setFormAddress(''); }} className="w-full bg-[#1b2e22] text-white py-5 rounded-[2rem] font-bold text-xs tracking-[0.2em] uppercase shadow-2xl hover:bg-[#2d6a4f] transition-all border-b-4 border-black/20">+ Pubblica Segnale</button>
+            <button onClick={() => { setIsPickerActive(true); setEditingId(null); setFormText(''); setFormAddress(''); }} className="w-full bg-[#1b2e22] text-white py-5 rounded-[2rem] font-bold text-xs tracking-[0.2em] uppercase shadow-2xl hover:bg-[#2d6a4f] transition-all border-b-4 border-black/20 transform active:translate-y-1 active:border-b-0">+ Pubblica Segnale</button>
           ) : (
-            <div className="flex gap-2 p-2 bg-white/90 backdrop-blur-xl rounded-[2.5rem] shadow-2xl">
+            <div className="flex gap-2 p-2 bg-white/90 backdrop-blur-xl rounded-[2.5rem] shadow-2xl border border-white/50">
               <button onClick={() => setIsPickerActive(false)} className="flex-1 py-4 text-gray-400 font-bold text-[10px] uppercase">Annulla</button>
-              <button onClick={() => { setIsPickerActive(false); setIsModalOpen(true); }} className="flex-[2] py-4 bg-[#2d6a4f] text-white rounded-[2rem] font-bold text-[10px] uppercase tracking-widest shadow-lg">Conferma Indirizzo</button>
+              <button onClick={() => { setIsPickerActive(false); setIsModalOpen(true); }} className="flex-[2] py-4 bg-[#2d6a4f] text-white rounded-[2rem] font-bold text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-transform">Conferma Luogo</button>
             </div>
           )}
         </div>
       </main>
 
-      <AIPanel isOpen={isAIOpen} onClose={() => setIsAIOpen(false)} onSimulatePins={() => {}} />
+      <AIPanel isOpen={isAIOpen} onClose={() => setIsAIOpen(false)} onSimulatePins={handleSimulateFromChat} />
 
       {isModalOpen && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-[#1b2e22]/80 backdrop-blur-sm p-4">
-          <div className="bg-[#f4f0e8] rounded-[3rem] p-10 w-full max-w-lg shadow-2xl animate-pop-in relative border border-white/20">
-            <h3 className="font-serif-display text-4xl text-[#1b2e22] tracking-tighter mb-8">{editingId ? 'Modifica' : 'Nuovo Pin'}</h3>
+          <div className="bg-[#f4f0e8] rounded-[3rem] p-8 md:p-10 w-full max-w-lg shadow-2xl animate-pop-in relative border border-white/20">
+            <h3 className="font-serif-display text-4xl text-[#1b2e22] tracking-tighter mb-8">{editingId ? 'Modifica' : 'Nuovo Post-it'}</h3>
             <div className="space-y-6">
               <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
                 {(Object.keys(PIN_CONFIG) as PinType[]).map(type => (
@@ -251,8 +303,8 @@ const App: React.FC = () => {
                   </button>
                 ))}
               </div>
-              <input className="w-full bg-white border-2 border-gray-100 rounded-2xl px-6 py-4 text-sm outline-none focus:border-[#2d6a4f] transition-all font-medium" placeholder="Via / Piazza esatta..." value={formAddress} onChange={(e) => setFormAddress(e.target.value)} />
-              <textarea className="w-full h-32 bg-white border-2 border-gray-100 rounded-[2rem] p-6 text-sm outline-none focus:border-[#2d6a4f] resize-none transition-all" placeholder="Il tuo messaggio alla città..." maxLength={140} value={formText} onChange={(e) => setFormText(e.target.value)} />
+              <input className="w-full bg-white border-2 border-gray-100 rounded-2xl px-6 py-4 text-sm outline-none focus:border-[#2d6a4f] transition-all font-medium" placeholder="Via / Piazza di Foggia..." value={formAddress} onChange={(e) => setFormAddress(e.target.value)} />
+              <textarea className="w-full h-32 bg-white border-2 border-gray-100 rounded-[2rem] p-6 text-sm outline-none focus:border-[#2d6a4f] resize-none transition-all" placeholder="Scrivi il tuo messaggio alla città (max 140 car)..." maxLength={140} value={formText} onChange={(e) => setFormText(e.target.value)} />
               <div className="flex gap-3">
                 <button onClick={() => setIsModalOpen(false)} className="flex-1 py-5 font-bold text-gray-400 text-[10px] uppercase">Chiudi</button>
                 <button onClick={handleSave} className="flex-[3] py-5 bg-[#1b2e22] text-white font-bold rounded-[2rem] shadow-xl hover:bg-[#2d6a4f] transition-all active:scale-95 uppercase text-[10px] tracking-widest">Attacca sulla Mappa</button>
