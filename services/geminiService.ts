@@ -6,12 +6,12 @@ import { Pin } from "../types";
 export const fetchRealTimeCitySignals = async (): Promise<Partial<Pin>[]> => {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    // Utilizziamo Gemini 3 Pro per il supporto a Google Search
+    // Usiamo gemini-3-pro-preview per la ricerca complessa e il grounding
     const response = await ai.models.generateContent({
       model: "gemini-3-pro-preview",
-      contents: "Trova le ultime notizie, eventi o segnalazioni di degrado/lavori stradali/iniziative civiche a Foggia (Italia) pubblicate nelle ultime 48 ore. Trasformale in 5 post-it per GreenPin.",
+      contents: "Cerca notizie REALI, eventi, lavori in corso o allerte meteo a Foggia (Puglia, Italia) pubblicate nelle ultime 24-48 ore. Trasformale in 5 oggetti JSON per la mappa GreenPin. Includi per ogni notizia: testo breve, indirizzo approssimativo (via o piazza di Foggia), coordinate lat/lng precise e l'URL della fonte se disponibile.",
       config: {
-        systemInstruction: SYSTEM_PROMPT + "\nUsa Google Search per trovare dati REALI. Restituisci JSON con lat e lng precise per le zone di Foggia menzionate.",
+        systemInstruction: SYSTEM_PROMPT + "\nSEI UN AGGREGATORE DI NEWS REALI. Restituisci JSON puro. Usa coordinate reali per le zone citate (es. Piazza Cavour 41.460, 15.545).",
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
@@ -20,23 +20,25 @@ export const fetchRealTimeCitySignals = async (): Promise<Partial<Pin>[]> => {
             type: Type.OBJECT,
             properties: {
               type: { type: Type.STRING },
-              emoji: { type: Type.STRING },
               text: { type: Type.STRING },
               address: { type: Type.STRING },
               user: { type: Type.STRING },
               time: { type: Type.STRING },
               lat: { type: Type.NUMBER },
               lng: { type: Type.NUMBER },
+              sourceUrl: { type: Type.STRING },
               sentiment: { type: Type.STRING }
             },
-            required: ["type", "text", "address", "lat", "lng"]
+            required: ["text", "address", "lat", "lng"]
           }
         }
       }
     });
 
-    // Estraiamo i link se presenti per referenziare la fonte (Grounding)
-    console.log("Sources:", response.candidates?.[0]?.groundingMetadata?.groundingChunks);
+    // Logging dei grounding chunks come richiesto
+    if (response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
+        console.log("Foggia News Sources:", response.candidates[0].groundingMetadata.groundingChunks);
+    }
     
     return JSON.parse(response.text || '[]');
   } catch (error) {
@@ -56,7 +58,7 @@ export const chatWithAI = async (message: string, history: { role: 'user' | 'bot
     const chat = ai.chats.create({
       model: 'gemini-3-flash-preview',
       config: {
-        systemInstruction: SYSTEM_PROMPT + "\nTi trovi ad operare sulla mappa di Foggia. Sei connesso ai segnali live della città.",
+        systemInstruction: SYSTEM_PROMPT + "\nTi trovi ad operare sulla mappa di Foggia. Rispondi in modo iper-locale.",
       },
       history: chatHistory,
     });
@@ -73,7 +75,7 @@ export const generateSimulatedPins = async (scenario: string): Promise<Partial<P
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Genera 5 post-it simulati a FOGGIA. Scenario: ${scenario}`,
+      contents: `Genera 5 post-it simulati a FOGGIA basati su questo scenario: ${scenario}`,
       config: {
         systemInstruction: SYSTEM_PROMPT,
         responseMimeType: "application/json",
@@ -83,7 +85,6 @@ export const generateSimulatedPins = async (scenario: string): Promise<Partial<P
             type: Type.OBJECT,
             properties: {
               type: { type: Type.STRING },
-              emoji: { type: Type.STRING },
               text: { type: Type.STRING },
               address: { type: Type.STRING },
               user: { type: Type.STRING },

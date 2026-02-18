@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Pin, PinType } from './types';
 import { PIN_CONFIG } from './constants';
@@ -20,18 +20,13 @@ const getAuthorToken = () => {
   return token;
 };
 
-// Algoritmo migliorato per distanziare i pin sovrapposti
 const deconflictPins = (pins: Pin[]): Pin[] => {
   const coordinateMap: Record<string, number> = {};
   return pins.map(pin => {
-    // Usiamo una precisione di 5 decimali per raggruppare pin "quasi" identici
     const key = `${pin.lat.toFixed(5)},${pin.lng.toFixed(5)}`;
     const count = coordinateMap[key] || 0;
     coordinateMap[key] = count + 1;
-    
     if (count === 0) return pin;
-    
-    // Se c'è sovrapposizione, spostiamo leggermente a spirale
     const angle = count * 0.5;
     const offset = 0.00015 * count;
     return {
@@ -48,30 +43,35 @@ const PostItMarker: React.FC<{
   isOwner: boolean; 
   onEdit: (pin: Pin) => void;
 }> = ({ pin, isOwner, onEdit }) => {
-  const config = PIN_CONFIG[pin.type];
+  const config = PIN_CONFIG[pin.type === 'news' ? 'visto' : pin.type];
   const [isExpanded, setIsExpanded] = useState(false);
 
   const icon = L.divIcon({
     className: 'custom-div-icon',
     html: isExpanded ? `
-      <div class="expanded-postit w-64 p-5 shadow-2xl rounded-sm relative border-t-[6px]" style="background-color: ${config.color}; border-color: rgba(0,0,0,0.1); transform: rotate(${pin.rotation || 0}deg);">
+      <div class="expanded-postit w-64 p-5 shadow-2xl rounded-sm relative border-t-[6px]" style="background-color: ${pin.isLive ? '#ef6351' : config.color}; border-color: rgba(0,0,0,0.1); transform: rotate(${pin.rotation || 0}deg);">
+        ${pin.isLive ? '<div class="absolute -top-3 -right-3 bg-red-600 text-white text-[7px] font-black px-2 py-1 rounded-full shadow-lg animate-pulse ring-2 ring-white">LIVE NEWS</div>' : ''}
         <div class="absolute -top-4 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-black/10 shadow-inner flex items-center justify-center">
           <div class="w-2 h-2 bg-black/20 rounded-full"></div>
         </div>
-        <div class="font-mono text-[9px] uppercase font-extrabold tracking-widest text-black/40 mb-2">${config.emoji} ${pin.type} • ${pin.address}</div>
+        <div class="font-mono text-[9px] uppercase font-extrabold tracking-widest text-black/40 mb-2">
+          ${pin.isLive ? '📢 NEWS' : (config.emoji + ' ' + pin.type)} • ${pin.address}
+        </div>
         <div class="font-serif text-[15px] leading-snug text-black/90 mb-4 font-medium italic">"${pin.text}"</div>
         <div class="flex justify-between items-center border-t border-black/5 pt-3">
           <div class="flex flex-col">
             <span class="font-mono text-[9px] font-bold text-black/60">${pin.user}</span>
             <span class="font-mono text-[8px] text-black/30">${pin.time}</span>
           </div>
+          ${pin.sourceUrl ? `<a href="${pin.sourceUrl}" target="_blank" class="bg-black/10 hover:bg-black/20 text-black text-[8px] px-2 py-1 rounded font-bold transition-all">Leggi Fonte</a>` : ''}
           ${isOwner ? `<button id="btn-edit-${pin.id}" class="bg-[#1b2e22] text-white text-[8px] px-3 py-1.5 rounded-full uppercase font-bold tracking-tighter hover:bg-black transition-all">Modifica</button>` : ''}
         </div>
         <div class="absolute -bottom-2 -right-2 bg-white rounded-full w-8 h-8 flex items-center justify-center text-[14px] shadow-xl border border-gray-100 cursor-pointer hover:scale-110 transition-transform">✕</div>
       </div>
     ` : `
-      <div class="pin-3d shadow-lg ${pin.authorId === 'system-ai' ? 'ring-2 ring-white ring-offset-2 animate-pulse' : ''}" style="background: ${config.color}; border: 3px solid white;">
-        <span class="absolute inset-0 flex items-center justify-center text-[12px] transform rotate(45deg)">${config.emoji}</span>
+      <div class="pin-3d shadow-lg ${pin.isLive ? 'ring-4 ring-red-400 animate-bounce' : (pin.authorId === 'system-ai' ? 'ring-2 ring-white ring-offset-2 animate-pulse' : '')}" 
+           style="background: ${pin.isLive ? '#ef6351' : config.color}; border: 3px solid white;">
+        <span class="absolute inset-0 flex items-center justify-center text-[12px] transform rotate(45deg)">${pin.isLive ? '📢' : config.emoji}</span>
       </div>
     `,
     iconSize: isExpanded ? [260, 220] : [34, 34],
@@ -112,7 +112,6 @@ const App: React.FC = () => {
   const [formAddress, setFormAddress] = useState('');
   const [formType, setFormType] = useState<PinType>('visto');
 
-  // 1. CARICAMENTO INIZIALE E REALTIME SUPABASE
   useEffect(() => {
     const fetchPins = async () => {
       setIsSyncing(true);
@@ -122,58 +121,45 @@ const App: React.FC = () => {
         if (data) setPins(data as Pin[]);
         setSyncError(false);
       } catch (err) {
-        console.error("Errore Supabase:", err);
         setSyncError(true);
       } finally {
         setIsSyncing(false);
       }
     };
-
     fetchPins();
-
-    const channel = supabase
-      .channel('public:pins')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pins' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          setPins(current => [...current, payload.new as Pin]);
-        } else if (payload.eventType === 'UPDATE') {
-          setPins(current => current.map(p => p.id === payload.new.id ? (payload.new as Pin) : p));
-        } else if (payload.eventType === 'DELETE') {
-          setPins(current => current.filter(p => p.id !== payload.old.id));
-        }
-      })
-      .subscribe();
-
+    const channel = supabase.channel('public:pins').on('postgres_changes', { event: '*', schema: 'public', table: 'pins' }, (payload) => {
+      if (payload.eventType === 'INSERT') setPins(curr => [...curr, payload.new as Pin]);
+      else if (payload.eventType === 'UPDATE') setPins(curr => curr.map(p => p.id === payload.new.id ? (payload.new as Pin) : p));
+      else if (payload.eventType === 'DELETE') setPins(curr => curr.filter(p => p.id !== payload.old.id));
+    }).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // 2. CARICAMENTO LIVE FEED (GEMINI SEARCH)
   const refreshLiveFeed = useCallback(async () => {
     setIsSearchingAI(true);
     try {
       const liveSignals = await fetchRealTimeCitySignals();
       const mapped = liveSignals.map((s, i) => ({
         ...s,
-        id: `ai-${Date.now()}-${i}`,
+        id: `ai-news-${Date.now()}-${i}`,
         authorId: 'system-ai',
-        sentiment: s.sentiment || 'neutro',
-        reactions: { like: Math.floor(Math.random()*20), heart: 0, comment: 0 },
-        tags: [],
+        type: (s.type as PinType) || 'visto',
+        emoji: '📢',
+        isLive: true,
+        reactions: { like: Math.floor(Math.random()*50), heart: 10, comment: 5 },
+        tags: ["#livenews", "#foggia"],
         rotation: Math.random() * 6 - 3
       } as Pin));
       setAiPins(mapped);
     } catch (e) {
-      console.warn("Live Feed non disponibile al momento");
+      console.warn("Live Feed non disponibile");
     } finally {
       setIsSearchingAI(false);
     }
   }, []);
 
-  useEffect(() => {
-    refreshLiveFeed();
-  }, [refreshLiveFeed]);
+  useEffect(() => { refreshLiveFeed(); }, [refreshLiveFeed]);
 
-  // 3. GENERAZIONE SIMULATA DALLA CHAT
   const handleSimulateFromChat = async (scenario: string) => {
     setIsSearchingAI(true);
     try {
@@ -182,14 +168,15 @@ const App: React.FC = () => {
         ...s,
         id: `sim-${Date.now()}-${i}`,
         authorId: 'system-ai',
-        sentiment: 'ispirante',
+        type: (s.type as PinType) || 'visto',
+        emoji: PIN_CONFIG[(s.type as PinType) || 'visto'].emoji,
         reactions: { like: 0, heart: 0, comment: 0 },
         tags: ["#simulazione"],
         rotation: Math.random() * 10 - 5
       } as Pin));
       setAiPins(prev => [...prev, ...mapped]);
     } catch (e) {
-      console.error("Simulation error:", e);
+      console.error("Simulation error");
     } finally {
       setIsSearchingAI(false);
     }
@@ -197,7 +184,6 @@ const App: React.FC = () => {
 
   const handleSave = async () => {
     if (!formText.trim() || !formAddress.trim()) return;
-
     const pinData = {
       id: editingId || `pin-${Date.now()}`,
       authorId: myToken,
@@ -214,18 +200,12 @@ const App: React.FC = () => {
       lng: pickerPos[1],
       rotation: Math.random() * 8 - 4
     };
-
     try {
-      if (editingId) {
-        const { error } = await supabase.from('pins').update(pinData).eq('id', editingId);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('pins').insert([pinData]);
-        if (error) throw error;
-      }
+      if (editingId) await supabase.from('pins').update(pinData).eq('id', editingId);
+      else await supabase.from('pins').insert([pinData]);
       setIsModalOpen(false);
     } catch (err) {
-      alert("Errore nel salvataggio. Assicurati di aver configurato correttamente Supabase.");
+      alert("Errore salvataggio Supabase.");
     }
   };
 
@@ -241,19 +221,15 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2">
               <div className={`w-1.5 h-1.5 rounded-full ${syncError ? 'bg-red-500' : (isSyncing ? 'bg-yellow-400 animate-pulse' : 'bg-green-500')}`}></div>
               <p className="text-[7px] uppercase tracking-widest font-bold text-gray-400">
-                {syncError ? 'Connessione Fallita' : (isSyncing ? 'Sincronizzando...' : 'Cloud Attivo')}
+                {syncError ? 'Connessione Fallita' : (isSyncing ? 'Cloud Sync...' : 'Cloud Attivo')}
               </p>
             </div>
           </div>
         </div>
-        
         <div className="flex items-center gap-3">
-          {isSearchingAI && (
-            <div className="hidden md:flex items-center gap-2 bg-white px-3 py-1.5 rounded-full border border-[#95d5b2]/30 shadow-sm animate-pulse">
-               <span className="w-2 h-2 bg-[#2d6a4f] rounded-full"></span>
-               <span className="text-[8px] font-bold uppercase tracking-widest text-[#2d6a4f]">AI sta cercando...</span>
-            </div>
-          )}
+          <button onClick={refreshLiveFeed} className="p-2 hover:bg-gray-100 rounded-full transition-colors" title="Aggiorna News">
+            <span className={`text-lg block ${isSearchingAI ? 'animate-spin' : ''}`}>🔄</span>
+          </button>
           <button onClick={() => setIsAIOpen(true)} className="bg-[#1b2e22] text-white px-5 py-2.5 rounded-full text-[9px] font-bold tracking-widest uppercase shadow-xl hover:bg-[#2d6a4f] transition-all flex items-center gap-2">
             <span className="text-sm">✦</span> Chat Advisor
           </button>
@@ -269,11 +245,9 @@ const App: React.FC = () => {
           ))}
         </MapContainer>
 
-        {isPickerActive && (
-          <div className="absolute inset-0 pointer-events-none z-[1001] flex items-center justify-center">
-             <div className="w-16 h-16 border-2 border-[#2d6a4f] rounded-full flex items-center justify-center animate-pulse shadow-[0_0_50px_rgba(45,106,79,0.2)]">
-               <div className="w-1 h-1 bg-[#2d6a4f] rounded-full"></div>
-             </div>
+        {isSearchingAI && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-red-600 text-white px-4 py-2 rounded-full shadow-2xl flex items-center gap-2 animate-bounce">
+            <span className="text-xs font-black uppercase tracking-widest">Recupero News di Foggia in corso...</span>
           </div>
         )}
 

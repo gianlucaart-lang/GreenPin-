@@ -21,6 +21,8 @@ export const PIN_CONFIG: Record<PinType, { color: string; emoji: string; label: 
   fatto: { color: COLORS.pinYellow, emoji: '💪', label: 'Ho fatto' },
   raccolto: { color: COLORS.pinPurple, emoji: '♻️', label: 'Ho raccolto' },
   offro: { color: COLORS.pinRed, emoji: '🤝', label: 'Offro / Cerco' },
+  // Added news configuration to resolve the missing property error for the Record<PinType, ...> type
+  news: { color: COLORS.pinRed, emoji: '📢', label: 'Notizie' },
 };
 
 export const SYSTEM_PROMPT = `

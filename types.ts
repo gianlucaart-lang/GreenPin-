@@ -1,5 +1,5 @@
 
-export type PinType = 'visto' | 'fatto' | 'raccolto' | 'offro';
+export type PinType = 'visto' | 'fatto' | 'raccolto' | 'offro' | 'news';
 
 export interface PinReactions {
   like: number;
@@ -9,11 +9,11 @@ export interface PinReactions {
 
 export interface Pin {
   id: string;
-  authorId: string; // ID dell'utente che ha creato il pin
+  authorId: string;
   type: PinType;
   emoji: string;
   text: string;
-  address: string; // Via specifica
+  address: string;
   user: string;
   time: string;
   sentiment: 'positivo' | 'neutro' | 'urgente' | 'ispirante';
@@ -21,29 +21,12 @@ export interface Pin {
   tags: string[];
   lat: number;
   lng: number;
-  x?: number; // Added to fix "Property 'x' does not exist on type 'Pin'"
-  y?: number; // Added to fix "Property 'y' does not exist on type 'Pin'"
   rotation?: number;
-}
-
-export interface AreaAnalysis {
-  zona: string;
-  periodo: string;
-  ratio_visto_fatto: string;
-  utenti_catalizzatore: string[];
-  picchi_orari: string[];
-  temi_ricorrenti: string[];
-  insight_principale: string;
-  azione_consigliata: string;
-  confronto_benchmark: string;
-}
-
-export interface ConnectionSuggestion {
-  pin_A: string;
-  pin_B: string;
-  connessione: string;
-  azione_suggerita: string;
-  valore_generato: string;
+  sourceUrl?: string; // URL della notizia reale
+  isLive?: boolean;   // Flag per news in tempo reale
+  // Added optional x and y coordinates to support relative positioning on CSS maps
+  x?: number;
+  y?: number;
 }
 
 export interface ChatMessage {
