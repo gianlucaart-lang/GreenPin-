@@ -17,7 +17,8 @@ const PostIt: React.FC<PostItProps> = ({ pin, onReact, style }) => {
     <div
       className="absolute w-44 sm:w-52 rounded-sm p-3 pb-4 cursor-pointer shadow-lg hover:shadow-2xl transition-all duration-200 hover:scale-105 animate-pop-in z-10 hover:z-50"
       style={{
-        // Handle potentially undefined x and y coordinates with fallback positioning
+        // Use updated Pin type properties x and y for absolute positioning
+        // Added explicit checks for x and y existence now that they are in the interface
         left: pin.x !== undefined ? `${pin.x}%` : '0%',
         top: pin.y !== undefined ? `${pin.y}%` : '0%',
         backgroundColor: config.color,

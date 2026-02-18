@@ -9,18 +9,20 @@ export interface PinReactions {
 
 export interface Pin {
   id: string;
+  authorId: string; // ID dell'utente che ha creato il pin
   type: PinType;
   emoji: string;
   text: string;
+  address: string; // Via specifica
   user: string;
   time: string;
   sentiment: 'positivo' | 'neutro' | 'urgente' | 'ispirante';
   reactions: PinReactions;
   tags: string[];
-  lat: number; // Latitudine reale
-  lng: number; // Longitudine reale
-  x?: number; // Added for compatibility with coordinate-based positioning
-  y?: number; // Added for compatibility with coordinate-based positioning
+  lat: number;
+  lng: number;
+  x?: number; // Added to fix "Property 'x' does not exist on type 'Pin'"
+  y?: number; // Added to fix "Property 'y' does not exist on type 'Pin'"
   rotation?: number;
 }
 
