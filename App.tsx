@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Pin, PinType, AreaAnalysis } from './types';
@@ -8,61 +8,92 @@ import AIPanel from './components/AIPanel';
 import { generateSimulatedPins, analyzeArea } from './services/geminiService';
 
 const FOGGIA_COORDS: [number, number] = [41.4622, 15.5447];
-const STORAGE_KEY = 'green_pin_foggia_data';
-const USER_ID_KEY = 'green_pin_user_id';
+const STORAGE_KEY = 'green_pin_foggia_v3';
+const USER_ID_KEY = 'gp_author_token';
 
-// Generatore di ID Utente semplice per persistenza locale
-const getMyUserId = () => {
-  let id = localStorage.getItem(USER_ID_KEY);
-  if (!id) {
-    id = 'user_' + Math.random().toString(36).substr(2, 9);
-    localStorage.setItem(USER_ID_KEY, id);
+// Genera o recupera un ID unico per l'utente (persiste nel browser)
+const getAuthorToken = () => {
+  let token = localStorage.getItem(USER_ID_KEY);
+  if (!token) {
+    token = 'cit_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem(USER_ID_KEY, token);
   }
-  return id;
+  return token;
+};
+
+// Algoritmo di spaziatura: se più pin hanno le stesse coordinate, li sposta leggermente
+const deconflictPins = (pins: Pin[]): Pin[] => {
+  const coordinateMap: Record<string, number> = {};
+  return pins.map(pin => {
+    const key = `${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}`;
+    const count = coordinateMap[key] || 0;
+    coordinateMap[key] = count + 1;
+    
+    if (count === 0) return pin;
+    
+    // Offset calcolato per creare un effetto "massa" naturale senza sovrapposizioni totali
+    const offset = 0.00008 * count;
+    const angle = count * (360 / 8); // Distribuzione a raggiera
+    const latOffset = offset * Math.cos(angle * (Math.PI / 180));
+    const lngOffset = offset * Math.sin(angle * (Math.PI / 180));
+    
+    return {
+      ...pin,
+      lat: pin.lat + latOffset,
+      lng: pin.lng + lngOffset
+    };
+  });
 };
 
 const PostItMarker: React.FC<{ 
   pin: Pin; 
-  isMyPin: boolean; 
-  onReact: (id: string, type: 'like' | 'heart' | 'comment') => void;
+  isOwner: boolean; 
   onEdit: (pin: Pin) => void;
-}> = ({ pin, isMyPin, onReact, onEdit }) => {
+}> = ({ pin, isOwner, onEdit }) => {
   const config = PIN_CONFIG[pin.type];
   const [isExpanded, setIsExpanded] = useState(false);
 
   const icon = L.divIcon({
     className: 'custom-div-icon',
     html: isExpanded ? `
-      <div class="expanded-postit w-60 p-4 shadow-2xl rounded-sm relative" style="background-color: ${config.color}; transform: rotate(${pin.rotation || 0}deg);">
-        <div class="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-black/20 shadow-inner"></div>
-        <div class="font-mono text-[9px] uppercase tracking-widest opacity-60 mb-2">${config.emoji} ${pin.type} @ ${pin.address}</div>
-        <div class="font-serif text-[15px] leading-snug text-black/90 mb-3">${pin.text}</div>
-        
-        <div class="flex justify-between border-t border-black/5 pt-2 font-mono text-[9px] text-black/40">
-          <span>${pin.user}</span>
-          <span>${pin.time}</span>
+      <div class="expanded-postit w-64 p-5 shadow-2xl rounded-sm relative border-t-[6px]" style="background-color: ${config.color}; border-color: rgba(0,0,0,0.1); transform: rotate(${pin.rotation || 0}deg);">
+        <div class="absolute -top-4 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-black/10 shadow-inner flex items-center justify-center">
+          <div class="w-2 h-2 bg-black/20 rounded-full"></div>
         </div>
-
-        ${isMyPin ? `
-          <button id="edit-${pin.id}" class="mt-3 w-full py-2 bg-black/10 hover:bg-black/20 rounded font-bold text-[10px] uppercase tracking-wider transition-all">Modifica il mio post-it</button>
-        ` : ''}
         
-        <div class="absolute -bottom-2 -right-2 bg-white rounded-full w-6 h-6 flex items-center justify-center text-[10px] shadow-md border border-gray-100 cursor-pointer hover:bg-gray-50">✖</div>
+        <div class="font-mono text-[9px] uppercase font-extrabold tracking-widest text-black/40 mb-2">
+          ${config.emoji} ${pin.type} • ${pin.address}
+        </div>
+        
+        <div class="font-serif text-[16px] leading-snug text-black/90 mb-4 font-medium italic">
+          "${pin.text}"
+        </div>
+        
+        <div class="flex justify-between items-center border-t border-black/5 pt-3">
+          <div class="flex flex-col">
+            <span class="font-mono text-[9px] font-bold text-black/60">${pin.user}</span>
+            <span class="font-mono text-[8px] text-black/30">${pin.time}</span>
+          </div>
+          ${isOwner ? `<button id="btn-edit-${pin.id}" class="bg-black/80 text-white text-[8px] px-2 py-1 rounded uppercase font-bold tracking-tighter hover:bg-black transition-all">Modifica</button>` : ''}
+        </div>
+        
+        <div class="absolute -bottom-2 -right-2 bg-white rounded-full w-8 h-8 flex items-center justify-center text-[14px] shadow-xl border border-gray-100 cursor-pointer hover:scale-110 transition-transform">✕</div>
       </div>
     ` : `
-      <div class="pin-3d" style="background: radial-gradient(circle at 30% 30%, ${config.color}, #444);"></div>
+      <div class="pin-3d shadow-lg" style="background: ${config.color}; border: 3px solid white;">
+        <span class="absolute inset-0 flex items-center justify-center text-[12px] transform rotate(45deg)">${config.emoji}</span>
+      </div>
     `,
-    iconSize: isExpanded ? [240, 200] : [30, 30],
-    iconAnchor: isExpanded ? [120, 180] : [15, 30]
+    iconSize: isExpanded ? [260, 220] : [34, 34],
+    iconAnchor: isExpanded ? [130, 180] : [17, 34]
   });
 
-  // Gestione click sul tasto modifica iniettato via HTML string (Leaflet limitation)
   useEffect(() => {
-    if (isExpanded && isMyPin) {
-      const btn = document.getElementById(`edit-${pin.id}`);
+    if (isExpanded && isOwner) {
+      const btn = document.getElementById(`btn-edit-${pin.id}`);
       if (btn) btn.onclick = (e) => { e.stopPropagation(); onEdit(pin); };
     }
-  }, [isExpanded, isMyPin, pin.id]);
+  }, [isExpanded, isOwner, pin.id]);
 
   return (
     <Marker 
@@ -75,48 +106,29 @@ const PostItMarker: React.FC<{
   );
 };
 
-// Componente per catturare il movimento della mappa (Pin Picker)
-const MapPickerHelper = ({ onMove }: { onMove: (coords: [number, number]) => void }) => {
+const MapPicker = ({ onPositionChange }: { onPositionChange: (latlng: [number, number]) => void }) => {
   useMapEvents({
     move: (e) => {
       const center = e.target.getCenter();
-      onMove([center.lat, center.lng]);
+      onPositionChange([center.lat, center.lng]);
     }
   });
   return null;
 };
 
-const MapController = ({ target, userPos }: { target: [number, number] | null, userPos: [number, number] | null }) => {
-  const map = useMap();
-  useEffect(() => {
-    const timer = setTimeout(() => map.invalidateSize(), 400);
-    return () => clearTimeout(timer);
-  }, [map]);
-  useEffect(() => { if (target) map.flyTo(target, 17, { duration: 1.5 }); }, [target, map]);
-  useEffect(() => { if (userPos) map.flyTo(userPos, 17, { duration: 2 }); }, [userPos, map]);
-  return null;
-};
-
 const App: React.FC = () => {
-  const myId = useMemo(() => getMyUserId(), []);
+  const myToken = useMemo(() => getAuthorToken(), []);
   const [pins, setPins] = useState<Pin[]>([]);
-  const [filter, setFilter] = useState<PinType | 'all'>('all');
-  const [isAIOpen, setIsAIOpen] = useState(false);
-  const [analysis, setAnalysis] = useState<AreaAnalysis | null>(null);
-  const [isBusy, setIsBusy] = useState<'simulating' | 'analyzing' | 'locating' | null>(null);
-  
-  // States per creazione/modifica
-  const [isPickerMode, setIsPickerMode] = useState(false);
-  const [pickerCoords, setPickerCoords] = useState<[number, number]>(FOGGIA_COORDS);
+  const [isPickerActive, setIsPickerActive] = useState(false);
+  const [pickerPos, setPickerPos] = useState<[number, number]>(FOGGIA_COORDS);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingPinId, setEditingPinId] = useState<string | null>(null);
+  const [isAIOpen, setIsAIOpen] = useState(false);
   
-  const [newPinText, setNewPinText] = useState('');
-  const [newPinType, setNewPinType] = useState<PinType>('visto');
-  const [newPinAddress, setNewPinAddress] = useState('');
-  
-  const [mapTarget, setMapTarget] = useState<[number, number] | null>(null);
-  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  // State del Form
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formText, setFormText] = useState('');
+  const [formAddress, setFormAddress] = useState('');
+  const [formType, setFormType] = useState<PinType>('visto');
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -127,184 +139,207 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(pins));
   }, [pins]);
 
-  const handleEditPin = (pin: Pin) => {
-    setEditingPinId(pin.id);
-    setNewPinText(pin.text);
-    setNewPinType(pin.type);
-    setNewPinAddress(pin.address);
+  const handleStartNewPin = () => {
+    setIsPickerActive(true);
+    setEditingId(null);
+    setFormText('');
+    setFormAddress('');
+  };
+
+  const handleConfirmPosition = () => {
+    setIsPickerActive(false);
     setIsModalOpen(true);
   };
 
-  const startPinFlow = () => {
-    setIsPickerMode(true);
-    setEditingPinId(null);
-    setNewPinText('');
-    setNewPinAddress('');
-  };
-
-  const confirmLocation = () => {
-    setIsPickerMode(false);
+  const handleEdit = (pin: Pin) => {
+    setEditingId(pin.id);
+    setFormText(pin.text);
+    setFormAddress(pin.address);
+    setFormType(pin.type);
     setIsModalOpen(true);
   };
 
-  const handleSavePin = () => {
-    if (!newPinText.trim() || !newPinAddress.trim()) return;
+  const handleSave = () => {
+    if (!formText.trim() || !formAddress.trim()) {
+      alert("Per favore, inserisci sia il messaggio che la via.");
+      return;
+    }
 
-    if (editingPinId) {
-      setPins(prev => prev.map(p => p.id === editingPinId ? {
+    if (editingId) {
+      setPins(prev => prev.map(p => p.id === editingId ? {
         ...p,
-        text: newPinText,
-        type: newPinType,
-        address: newPinAddress,
-        emoji: PIN_CONFIG[newPinType].emoji,
-        time: 'modificato ora'
+        text: formText,
+        address: formAddress,
+        type: formType,
+        emoji: PIN_CONFIG[formType].emoji,
+        time: 'aggiornato ora'
       } : p));
     } else {
       const newPin: Pin = {
-        id: `real-${Date.now()}`,
-        authorId: myId,
-        type: newPinType,
-        emoji: PIN_CONFIG[newPinType].emoji,
-        text: newPinText,
-        address: newPinAddress,
-        user: "Cittadino Foggiano",
+        id: `pin-${Date.now()}`,
+        authorId: myToken,
+        type: formType,
+        emoji: PIN_CONFIG[formType].emoji,
+        text: formText,
+        address: formAddress,
+        user: "Cittadino",
         time: "adesso",
         sentiment: 'neutro',
         reactions: { like: 0, heart: 0, comment: 0 },
         tags: [],
-        lat: pickerCoords[0],
-        lng: pickerCoords[1],
-        rotation: Math.random() * 6 - 3
+        lat: pickerPos[0],
+        lng: pickerPos[1],
+        rotation: Math.random() * 8 - 4
       };
       setPins(prev => [newPin, ...prev]);
     }
     setIsModalOpen(false);
-    setMapTarget(editingPinId ? null : pickerCoords);
   };
 
-  const handleSimulate = async () => {
-    setIsBusy('simulating');
-    const simulated = await generateSimulatedPins("Aggiungi segnali per il centro storico di Foggia");
-    const newPins: Pin[] = simulated.map((p, i) => ({
-      ...p,
-      id: `sim-${Date.now()}-${i}`,
-      authorId: 'system',
-      address: 'Via Arpi e dintorni',
-      rotation: Math.random() * 8 - 4,
-      reactions: p.reactions || { like: 0, heart: 0, comment: 0 },
-    } as Pin));
-    setPins(prev => [...prev, ...newPins]);
-    setIsBusy(null);
-  };
+  const deconflictedPins = useMemo(() => deconflictPins(pins), [pins]);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#f4f0e8]">
-      {/* Header */}
-      <header className="fixed top-0 left-0 right-0 h-16 bg-white/80 backdrop-blur-xl border-b border-gray-200 z-[1000] flex items-center justify-between px-4 md:px-8">
-        <div className="flex items-center gap-3 md:gap-6">
+    <div className="h-screen w-screen flex flex-col bg-[#f4f0e8] overflow-hidden font-sans">
+      {/* Header Strategico */}
+      <header className="h-16 bg-white border-b border-gray-200 z-[1000] flex items-center justify-between px-6">
+        <div className="flex items-center gap-4">
           <div className="logo-gp">
             <div className="logo-g">G</div>
             <div className="logo-p">P</div>
           </div>
-          <div className="flex flex-col">
-            <h1 className="font-serif-display text-xl md:text-2xl tracking-tighter text-[#1b2e22] leading-none">
-              <span className="text-[#2d6a4f]">G</span>reen <span className="text-[#2d6a4f]">P</span>in <span className="text-gray-400 font-sans font-light ml-1 hidden sm:inline">Foggia</span>
-            </h1>
-            <p className="font-mono text-[8px] md:text-[9px] uppercase tracking-widest text-gray-400 mt-1">
-              Comunità Reale • Identità: {myId.slice(-4)}
-            </p>
+          <div>
+            <h1 className="font-serif-display text-xl tracking-tighter">Green Pin <span className="text-gray-400">Foggia</span></h1>
+            <p className="text-[8px] uppercase tracking-[0.2em] font-bold text-gray-400">Civic Action Network</p>
           </div>
         </div>
-
-        <div className="flex items-center gap-2 md:gap-4">
-          <button onClick={() => setIsAIOpen(true)} className="flex items-center gap-2 bg-[#1b2e22] text-white px-4 py-2 rounded-full font-bold text-[10px] md:text-xs hover:bg-[#2d6a4f] transition-all shadow-lg active:scale-95">
-            ✦ AI Engine
-          </button>
-        </div>
+        <button 
+          onClick={() => setIsAIOpen(true)}
+          className="bg-[#1b2e22] text-white px-4 py-2 rounded-full text-[10px] font-bold tracking-widest uppercase shadow-lg hover:bg-[#2d6a4f] transition-all"
+        >
+          ✦ AI Engine
+        </button>
       </header>
 
-      <div className="flex flex-1 mt-16 relative">
-        <main className="flex-1 relative h-full w-full">
-          <MapContainer center={FOGGIA_COORDS} zoom={15} scrollWheelZoom={true} style={{ height: '100%', width: '100%' }} zoomControl={false}>
-            <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" attribution='&copy; OpenStreetMap' />
-            <MapController target={mapTarget} userPos={userLocation} />
-            {isPickerMode && <MapPickerHelper onMove={setPickerCoords} />}
-            {pins.filter(p => filter === 'all' || p.type === filter).map(pin => (
-              <PostItMarker key={pin.id} pin={pin} isMyPin={pin.authorId === myId} onReact={() => {}} onEdit={handleEditPin} />
-            ))}
-          </MapContainer>
+      <main className="flex-1 relative">
+        <MapContainer center={FOGGIA_COORDS} zoom={15} zoomControl={false} style={{ height: '100%', width: '100%' }}>
+          <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+          
+          {isPickerActive && <MapPicker onPositionChange={setPickerPos} />}
+          
+          {deconflictedPins.map(pin => (
+            <PostItMarker 
+              key={pin.id} 
+              pin={pin} 
+              isOwner={pin.authorId === myToken} 
+              onEdit={handleEdit} 
+            />
+          ))}
+        </MapContainer>
 
-          {/* Crosshair Picker Mode */}
-          {isPickerMode && (
-            <div className="absolute inset-0 pointer-events-none z-[1001] flex items-center justify-center">
-              <div className="relative w-12 h-12">
-                <div className="absolute top-1/2 left-0 w-full h-0.5 bg-[#2d6a4f]"></div>
-                <div className="absolute left-1/2 top-0 w-0.5 h-full bg-[#2d6a4f]"></div>
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[#2d6a4f] rounded-full bg-white/50"></div>
-              </div>
-              <div className="absolute top-24 px-6 py-2 bg-[#2d6a4f] text-white text-[10px] font-bold uppercase tracking-widest rounded-full shadow-2xl">
-                Muovi la mappa per posizionare il segnale
-              </div>
+        {/* Mirino "Glovo Style" */}
+        {isPickerActive && (
+          <div className="absolute inset-0 pointer-events-none z-[1001] flex items-center justify-center">
+            <div className="relative flex items-center justify-center">
+              <div className="absolute w-20 h-[2px] bg-[#2d6a4f]"></div>
+              <div className="absolute h-20 w-[2px] bg-[#2d6a4f]"></div>
+              <div className="w-6 h-6 border-4 border-[#2d6a4f] rounded-full bg-white shadow-2xl"></div>
+            </div>
+            <div className="absolute top-20 bg-[#1b2e22] text-white px-6 py-3 rounded-full text-[10px] font-bold uppercase tracking-[0.2em] shadow-2xl">
+              Trascina la mappa sotto il mirino
+            </div>
+          </div>
+        )}
+
+        {/* Controlli Inferiori */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-md flex flex-col gap-4">
+          {!isPickerActive ? (
+            <button 
+              onClick={handleStartNewPin}
+              className="w-full bg-[#2d6a4f] text-white py-5 rounded-2xl font-bold text-sm tracking-widest uppercase shadow-2xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
+            >
+              <span className="text-xl">+</span> Nuovo Segnale
+            </button>
+          ) : (
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setIsPickerActive(false)}
+                className="flex-1 bg-white border border-gray-200 text-gray-500 py-4 rounded-2xl font-bold text-[10px] uppercase tracking-widest shadow-xl"
+              >
+                Annulla
+              </button>
+              <button 
+                onClick={handleConfirmPosition}
+                className="flex-[2] bg-[#1b2e22] text-white py-4 rounded-2xl font-bold text-[10px] uppercase tracking-widest shadow-xl"
+              >
+                Conferma Punto
+              </button>
             </div>
           )}
+        </div>
+      </main>
 
-          {/* Bottom HUD */}
-          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[1000] flex flex-col items-center gap-4 w-[90%] md:w-auto">
-             {!isPickerMode ? (
-               <div className="flex gap-2 p-2 bg-white/90 backdrop-blur-xl border border-gray-200 rounded-full shadow-2xl">
-                  <button onClick={handleSimulate} className="px-6 py-3 bg-[#2d6a4f] text-white rounded-full font-bold text-[10px] md:text-xs shadow-lg">✦ SIMULA</button>
-                  <button onClick={startPinFlow} className="px-8 py-3 bg-[#1b2e22] text-white rounded-full font-bold text-[10px] md:text-xs shadow-lg transition-transform active:scale-95">+ NUOVO SEGNALE</button>
-               </div>
-             ) : (
-               <div className="flex gap-2 p-2 bg-white/90 backdrop-blur-xl border border-gray-200 rounded-full shadow-2xl">
-                  <button onClick={() => setIsPickerMode(false)} className="px-6 py-3 bg-gray-100 text-gray-500 rounded-full font-bold text-[10px] md:text-xs">ANNULLA</button>
-                  <button onClick={confirmLocation} className="px-8 py-3 bg-[#2d6a4f] text-white rounded-full font-bold text-[10px] md:text-xs shadow-lg transition-transform active:scale-95">CONFERMA POSIZIONE</button>
-               </div>
-             )}
-          </div>
-        </main>
-        <AIPanel isOpen={isAIOpen} onClose={() => setIsAIOpen(false)} onSimulatePins={handleSimulate} />
-      </div>
+      <AIPanel isOpen={isAIOpen} onClose={() => setIsAIOpen(false)} onSimulatePins={() => {}} />
 
-      {/* Modal Inserimento/Modifica */}
+      {/* Modal Form di Precisione */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-[#1b2e22]/40 backdrop-blur-md p-4">
-           <div className="bg-white rounded-[2.5rem] p-8 md:p-12 w-full max-w-xl shadow-2xl relative animate-pop-in">
-              <h3 className="font-serif-display text-3xl text-[#1b2e22] mb-6">{editingPinId ? 'Modifica segnale' : 'Nuovo segnale'}</h3>
-              
-              <div className="space-y-6">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-[#1b2e22]/60 backdrop-blur-md p-4">
+          <div className="bg-white rounded-[2.5rem] p-8 md:p-12 w-full max-w-xl shadow-2xl animate-pop-in">
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="font-serif-display text-3xl text-[#1b2e22]">
+                {editingId ? 'Modifica Segnale' : 'Dettagli Segnale'}
+              </h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-300 hover:text-gray-500 text-3xl">&times;</button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Selezione Categoria */}
+              <div>
+                <label className="text-[9px] uppercase tracking-widest font-bold text-gray-400 mb-3 block">Tipo di azione</label>
                 <div className="grid grid-cols-2 gap-2">
                   {(Object.keys(PIN_CONFIG) as PinType[]).map(type => (
-                    <button key={type} onClick={() => setNewPinType(type)} className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all text-[10px] font-bold ${newPinType === type ? 'border-[#2d6a4f] bg-[#2d6a4f]/5' : 'border-gray-50 text-gray-400'}`}>
+                    <button 
+                      key={type}
+                      onClick={() => setFormType(type)}
+                      className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all text-[10px] font-bold ${formType === type ? 'border-[#2d6a4f] bg-[#2d6a4f]/5 text-[#2d6a4f]' : 'border-gray-50 text-gray-400'}`}
+                    >
                       <span>{PIN_CONFIG[type].emoji}</span> {PIN_CONFIG[type].label}
                     </button>
                   ))}
                 </div>
-
-                <div className="space-y-4">
-                  <input 
-                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-6 py-4 text-sm outline-none focus:border-[#2d6a4f]/30"
-                    placeholder="Via/Indirizzo es. Via Arpi 12"
-                    value={newPinAddress}
-                    onChange={(e) => setNewPinAddress(e.target.value)}
-                  />
-                  <textarea 
-                    className="w-full h-32 bg-gray-50 border border-gray-100 rounded-2xl p-6 text-sm outline-none focus:border-[#2d6a4f]/30 resize-none"
-                    placeholder="Racconta cosa succede qui..."
-                    maxLength={140}
-                    value={newPinText}
-                    onChange={(e) => setNewPinText(e.target.value)}
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                   <button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-xs text-gray-400">Annulla</button>
-                   <button onClick={handleSavePin} className="flex-[2] py-4 bg-[#2d6a4f] text-white font-bold rounded-2xl shadow-xl active:scale-95">
-                     {editingPinId ? 'Salva Modifiche' : 'Pubblica Segnale'}
-                   </button>
-                </div>
               </div>
-           </div>
+
+              {/* Input Via */}
+              <div>
+                <label className="text-[9px] uppercase tracking-widest font-bold text-gray-400 mb-2 block">Dove? (Via / Piazza / Corso)</label>
+                <input 
+                  autoFocus
+                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-6 py-4 text-sm outline-none focus:bg-white focus:border-[#2d6a4f]/30 transition-all font-medium"
+                  placeholder="es. Via Arpi, Corso Giannone..."
+                  value={formAddress}
+                  onChange={(e) => setFormAddress(e.target.value)}
+                />
+              </div>
+
+              {/* Input Messaggio */}
+              <div>
+                <label className="text-[9px] uppercase tracking-widest font-bold text-gray-400 mb-2 block">Cosa succede? (max 140 car.)</label>
+                <textarea 
+                  className="w-full h-32 bg-gray-50 border border-gray-100 rounded-2xl p-6 text-sm outline-none focus:bg-white focus:border-[#2d6a4f]/30 resize-none transition-all shadow-inner"
+                  placeholder="Racconta brevemente..."
+                  maxLength={140}
+                  value={formText}
+                  onChange={(e) => setFormText(e.target.value)}
+                />
+              </div>
+
+              <button 
+                onClick={handleSave}
+                className="w-full py-5 bg-[#2d6a4f] text-white font-bold rounded-2xl shadow-xl hover:bg-[#1b2e22] transition-all transform active:scale-95"
+              >
+                {editingId ? 'Salva Modifiche' : 'Attacca sulla Mappa'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
