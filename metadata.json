@@ -1,6 +1,6 @@
 {
-  "name": "Green Pin Foggia — Comunità Reale",
-  "description": "Piattaforma civica iperlocale per la città di Foggia. Segnala, agisci e connettiti con la tua comunità.",
+  "name": "Foggia Live Pulse — ORA in città",
+  "description": "App sociale iperlocale ed effimera focalizzata su ciò che sta accadendo a Foggia in questo momento.",
   "requestFramePermissions": [
     "camera",
     "geolocation"

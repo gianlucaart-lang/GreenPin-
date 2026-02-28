@@ -10,12 +10,16 @@ export interface PinReactions {
 export interface Pin {
   id: string;
   authorId: string;
+  authorName: string;   // Pseudo-anonymous name
+  authorAvatar: string; // Avatar URL or identifier
   type: PinType;
   emoji: string;
   text: string;
   address: string;
   user: string;
   time: string;
+  expiresAt: string;    // ISO string for expiration
+  isPremium?: boolean;  // If true, can last longer
   sentiment: 'positivo' | 'neutro' | 'urgente' | 'ispirante';
   reactions: PinReactions;
   tags: string[];
@@ -24,7 +28,6 @@ export interface Pin {
   rotation?: number;
   sourceUrl?: string; // URL della notizia reale
   isLive?: boolean;   // Flag per news in tempo reale
-  // Added optional x and y coordinates to support relative positioning on CSS maps
   x?: number;
   y?: number;
 }

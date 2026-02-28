@@ -1,5 +1,5 @@
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@^2.45.0';
+import { createClient } from '@supabase/supabase-js';
 
 // URL derivato dal riferimento del progetto contenuto nella tua chiave
 const SUPABASE_URL = 'https://wrwfqaqbskdfnthfoqqy.supabase.co';

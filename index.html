@@ -1,12 +1,10 @@
-
 <!DOCTYPE html>
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Green Pin Foggia — Comunità Reale</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+    <title>Foggia Live Pulse — ORA in città</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <style>
       html, body, #root {
@@ -15,53 +13,12 @@
         height: 100vh;
         width: 100vw;
         overflow: hidden;
+        background-color: #000;
       }
       body {
-        font-family: 'Syne', sans-serif;
-        background-color: #f4f0e8;
-        color: #1b2e22;
+        font-family: 'JetBrains Mono', monospace;
       }
-      .font-serif-display { font-family: 'DM Serif Display', serif; }
-      .font-mono-code { font-family: 'DM Mono', monospace; }
       
-      /* Logo GP Abbracciato - Stile Apple/Human */
-      .logo-gp {
-        position: relative;
-        width: 48px;
-        height: 44px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .logo-g, .logo-p {
-        width: 30px;
-        height: 30px;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: 800;
-        font-size: 16px;
-        color: white;
-        position: absolute;
-        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      }
-      .logo-g {
-        background: linear-gradient(135deg, #2d6a4f, #40916c);
-        left: 2px;
-        z-index: 2;
-        transform: translateX(6px);
-      }
-      .logo-p {
-        background: linear-gradient(135deg, #1b2e22, #2d6a4f);
-        right: 2px;
-        z-index: 1;
-        transform: translateX(-6px);
-      }
-      .logo-gp:hover .logo-g { transform: translateX(0px) scale(1.05); z-index: 1; }
-      .logo-gp:hover .logo-p { transform: translateX(0px) scale(1.05); z-index: 2; }
-
       /* Animazione post-it espanso */
       @keyframes expandPostIt {
         from { transform: scale(0.3) translateY(0); opacity: 0; }
@@ -75,25 +32,25 @@
 
       /* Pin 3D Style */
       .pin-3d {
-        width: 30px;
-        height: 30px;
+        width: 24px;
+        height: 24px;
         border-radius: 50% 50% 50% 0;
         transform: rotate(-45deg);
-        box-shadow: -2px 2px 5px rgba(0,0,0,0.2), inset -2px -2px 5px rgba(0,0,0,0.1);
+        box-shadow: 0 0 10px rgba(0,255,65,0.2);
         cursor: pointer;
-        transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        border: 2px solid white;
+        transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         position: relative;
       }
       .pin-3d:hover {
-        transform: rotate(-45deg) scale(1.3);
+        transform: rotate(-45deg) scale(1.5);
         z-index: 1000;
+        box-shadow: 0 0 20px rgba(0,255,65,0.5);
       }
 
       .leaflet-container {
         height: 100% !important;
         width: 100% !important;
-        background: #eef2f3 !important;
+        background: #000 !important;
         outline: 0;
       }
       
@@ -102,21 +59,10 @@
         border: none !important;
       }
 
-      ::-webkit-scrollbar { width: 4px; }
-      ::-webkit-scrollbar-thumb { background: #95d5b2; border-radius: 10px; }
+      ::-webkit-scrollbar { width: 2px; }
+      ::-webkit-scrollbar-thumb { background: #00ff41; }
     </style>
-    <script type="importmap">
-    {
-      "imports": {
-        "react": "https://esm.sh/react@^19.2.4",
-        "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-        "react/": "https://esm.sh/react@^19.2.4/",
-        "@google/genai": "https://esm.sh/@google/genai@^1.41.0",
-        "leaflet": "https://esm.sh/leaflet@^1.9.4",
-        "react-leaflet": "https://esm.sh/react-leaflet@^5.0.0"
-      }
-    }
-    </script>
+    <link rel="stylesheet" href="/index.css">
   </head>
   <body>
     <div id="root"></div>
