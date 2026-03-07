@@ -7,11 +7,14 @@ interface AIPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onSimulatePins: (scenario: string) => void;
+  lat: number;
+  lng: number;
+  cityCode: string;
 }
 
-const AIPanel: React.FC<AIPanelProps> = ({ isOpen, onClose, onSimulatePins }) => {
+const AIPanel: React.FC<AIPanelProps> = ({ isOpen, onClose, onSimulatePins, lat, lng, cityCode }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'bot', content: "Sincronizzazione completata. Sono il modulo AI di Foggia Live Pulse. Posso simulare impulsi iperlocali o analizzare il battito della città in tempo reale. Cosa vuoi trasmettere?" }
+    { role: 'bot', content: "Sincronizzazione completata. Sono il modulo AI di PIN. Posso simulare impulsi iperlocali o analizzare il battito della città in tempo reale. Cosa vuoi trasmettere?" }
   ]);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -35,7 +38,7 @@ const AIPanel: React.FC<AIPanelProps> = ({ isOpen, onClose, onSimulatePins }) =>
 
     setMessages(prev => [...prev, { role: 'bot', content: '', isGenerating: true }]);
     
-    const botResponse = await chatWithAI(userMsg, messages.map(m => ({ role: m.role, content: m.content })));
+    const botResponse = await chatWithAI(userMsg, messages.map(m => ({ role: m.role, content: m.content })), lat, lng, cityCode);
     
     setMessages(prev => {
       const filtered = prev.filter(m => !m.isGenerating);
@@ -47,11 +50,38 @@ const AIPanel: React.FC<AIPanelProps> = ({ isOpen, onClose, onSimulatePins }) =>
     }
   };
 
+  const triggerNewsCollection = async () => {
+    setMessages(prev => [...prev, { role: 'bot', content: '📡 Avvio scansione testate giornalistiche foggiane in corso...', isGenerating: true }]);
+    try {
+      const res = await fetch('/api/collect-news', { method: 'POST' });
+      if (res.ok) {
+        setMessages(prev => {
+          const filtered = prev.filter(m => !m.isGenerating);
+          return [...filtered, { role: 'bot', content: '✅ Scansione completata. I nuovi impulsi sono stati trasmessi sulla mappa.' }];
+        });
+      }
+    } catch (e) {
+      setMessages(prev => {
+        const filtered = prev.filter(m => !m.isGenerating);
+        return [...filtered, { role: 'bot', content: '❌ Errore durante la scansione delle news.' }];
+      });
+    }
+  };
+
   return (
     <div className={`fixed right-0 top-16 bottom-0 w-80 md:w-96 bg-black/95 backdrop-blur-xl border-l border-white/10 z-[80] flex flex-col transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
       <div className="p-5 border-b border-white/10 flex items-center justify-between">
         <h3 className="font-black text-sm text-[#00ff41] uppercase tracking-widest">✦ AI Pulse Engine</h3>
         <button onClick={onClose} className="text-white/40 hover:text-white text-xl">&times;</button>
+      </div>
+
+      <div className="p-3 bg-[#00ff41]/5 border-b border-[#00ff41]/10">
+        <button 
+          onClick={triggerNewsCollection}
+          className="w-full py-2 bg-[#00ff41]/10 border border-[#00ff41]/30 text-[#00ff41] text-[10px] font-black uppercase tracking-tighter hover:bg-[#00ff41]/20 transition-all flex items-center justify-center gap-2"
+        >
+          <span className="animate-pulse">📡</span> Sincronizza News Foggia
+        </button>
       </div>
       
       <div className="flex-1 overflow-y-auto p-4 space-y-4 font-mono">

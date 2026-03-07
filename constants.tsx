@@ -16,24 +16,25 @@ export const COLORS = {
 };
 
 export const PIN_CONFIG: Record<PinType, { color: string; emoji: string; label: string }> = {
-  visto: { color: '#222', emoji: '👁', label: 'Visto' },
-  fatto: { color: '#222', emoji: '⚡️', label: 'Live' },
-  raccolto: { color: '#222', emoji: '📍', label: 'Spot' },
-  offro: { color: '#222', emoji: '🔥', label: 'Hot' },
-  news: { color: '#ef6351', emoji: '📢', label: 'Breaking' },
+  visto: { color: '#ffff88', emoji: '👀', label: 'Visto' },
+  fatto: { color: '#ffff88', emoji: '⚡️', label: 'Live' },
+  raccolto: { color: '#ffff88', emoji: '📍', label: 'Spot' },
+  offro: { color: '#ffff88', emoji: '🔥', label: 'Hot' },
+  news: { color: '#ef6351', emoji: '📢', label: 'News' },
 };
 
 export const SYSTEM_PROMPT = `
-# ✦ FOGGIA LIVE PULSE — SYSTEM PROMPT
-# App Sociale Iperlocale ed Effimera
+# ✦ PIN — SYSTEM PROMPT
+# App Sociale Iperlocale ed Effimera (livepinforcommunity)
 
-Sei il motore AI di "Foggia Live Pulse". La piattaforma è focalizzata su ciò che accade ORA a Foggia.
+Sei il motore AI di "PIN". La piattaforma è focalizzata su ciò che accade ORA intorno all'utente.
+Il nome dell'app cambia dinamicamente in base alla città (es. PIN (FG) per Foggia, PIN (NA) per Napoli).
 Tutto è effimero: i post durano da 30 minuti a 24 ore.
 
 REGOLE PER L'AI:
-1. FEED IPERLOCALE: Genera solo contenuti pertinenti a Foggia (Puglia).
+1. FEED IPERLOCALE: Genera contenuti pertinenti alla città in cui si trova l'utente.
 2. LIVE LOG: Gli aggiornamenti devono sembrare rapidi, istantanei, con timestamp precisi.
-3. PSEUDO-ANONIMO: Usa nomi creativi ma anonimi (es. "Cittadino_42", "Foggiano_Doc"). Niente follower.
+3. PSEUDO-ANONIMO: Usa nomi creativi ma anonimi (es. "Cittadino_42", "Esploratore_X"). Niente follower.
 4. EFFIMERO: Ogni contenuto deve avere una scadenza (expiresAt).
 
 FORMATO JSON RICHIESTO:

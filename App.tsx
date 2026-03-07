@@ -1,12 +1,11 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { Pin, PinType } from './types';
 import { PIN_CONFIG } from './constants';
 import AIPanel from './components/AIPanel';
 import { fetchRealTimeCitySignals, generateSimulatedPins } from './services/geminiService';
-import { supabase } from './services/supabaseClient';
 
 const FOGGIA_COORDS: [number, number] = [41.4622, 15.5447];
 const USER_ID_KEY = 'flp_author_token';
@@ -54,7 +53,8 @@ const PostItMarker: React.FC<{
   pin: Pin; 
   isOwner: boolean; 
   onEdit: (pin: Pin) => void;
-}> = ({ pin, isOwner, onEdit }) => {
+  onLike: (pin: Pin) => void;
+}> = ({ pin, isOwner, onEdit, onLike }) => {
   const config = PIN_CONFIG[pin.type === 'news' ? 'visto' : pin.type];
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -69,27 +69,38 @@ const PostItMarker: React.FC<{
   const icon = L.divIcon({
     className: 'custom-div-icon',
     html: isExpanded ? `
-      <div class="expanded-postit w-64 p-5 shadow-2xl rounded-sm relative border-t-[6px] bg-black text-white" style="border-color: ${pin.isLive ? '#ff4e00' : '#00ff41'}; transform: rotate(${pin.rotation || 0}deg);">
-        <div class="absolute -top-3 -right-3 bg-black border border-white/20 text-[8px] font-mono px-2 py-1 rounded shadow-lg flex items-center gap-1">
-          <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+      <div class="expanded-postit w-64 p-6 shadow-2xl relative bg-[#ffff88] text-black" style="transform: rotate(${pin.rotation || 0}deg); box-shadow: 10px 10px 15px rgba(0,0,0,0.2);">
+        <div class="absolute -top-2 left-1/2 -translate-x-1/2 w-12 h-4 bg-white/40 rotate-1 shadow-sm"></div>
+        <div class="absolute top-2 right-2 text-[8px] font-mono opacity-50 flex items-center gap-2">
+          ${pin.sourceUrl ? `<a href="${pin.sourceUrl}" target="_blank" rel="noopener noreferrer" class="bg-black/10 px-1 rounded hover:bg-black/20 transition-colors">FONTE ↗</a>` : ''}
           ${timeLeft}
         </div>
-        <div class="flex items-center gap-2 mb-3">
-          <img src="${pin.authorAvatar}" class="w-6 h-6 rounded-full bg-white/10" />
+        <div class="flex items-center gap-2 mb-4">
+          <img src="${pin.authorAvatar}" class="w-6 h-6 rounded-full bg-black/5" />
           <div class="flex flex-col">
-            <span class="font-mono text-[9px] font-bold text-white/80">${pin.authorName}</span>
-            <span class="font-mono text-[7px] text-white/40">${pin.time} • ${pin.address}</span>
+            <span class="font-bold text-[10px] uppercase tracking-tight">${pin.authorName}</span>
+            <span class="text-[8px] opacity-60">${pin.time} • ${pin.address}</span>
           </div>
         </div>
-        <div class="font-serif text-[15px] leading-snug text-white mb-4 font-medium italic">"${pin.text}"</div>
-        <div class="flex justify-between items-center border-t border-white/10 pt-3">
+        <div class="font-serif text-[16px] leading-tight mb-6 min-h-[60px] flex items-center justify-center text-center px-2">
+          "${pin.text}"
+        </div>
+        <div class="flex justify-between items-center border-t border-black/10 pt-4">
+          <div class="flex gap-3">
+            <button id="btn-like-${pin.id}" class="flex items-center gap-1 hover:scale-110 transition-transform">
+              <span class="text-sm">🔥</span>
+              <span class="text-[10px] font-bold">${pin.reactions.like}</span>
+            </button>
+            <div class="flex items-center gap-1 opacity-40">
+              <span class="text-sm">💬</span>
+              <span class="text-[10px] font-bold">${pin.reactions.comment}</span>
+            </div>
+          </div>
           <div class="flex gap-2">
-            <span class="text-[10px]">🔥 ${pin.reactions.like}</span>
-            <span class="text-[10px]">💬 ${pin.reactions.comment}</span>
+            ${isOwner ? `<button id="btn-edit-${pin.id}" class="text-[9px] font-bold uppercase underline decoration-2 underline-offset-2">Edit</button>` : ''}
+            <button id="btn-close-${pin.id}" class="text-[9px] font-bold uppercase underline decoration-2 underline-offset-2">Close</button>
           </div>
-          ${isOwner ? `<button id="btn-edit-${pin.id}" class="bg-white/10 text-white text-[8px] px-3 py-1.5 rounded uppercase font-bold tracking-tighter hover:bg-white/20 transition-all">Edit</button>` : ''}
         </div>
-        <div class="absolute -bottom-2 -right-2 bg-white text-black rounded-full w-8 h-8 flex items-center justify-center text-[14px] shadow-xl cursor-pointer hover:scale-110 transition-transform">✕</div>
       </div>
     ` : `
       <div class="flex flex-col items-center group">
@@ -109,19 +120,50 @@ const PostItMarker: React.FC<{
   });
 
   useEffect(() => {
-    if (isExpanded && isOwner) {
-      const btn = document.getElementById(`btn-edit-${pin.id}`);
-      if (btn) btn.onclick = (e) => { e.stopPropagation(); onEdit(pin); };
+    if (isExpanded) {
+      if (isOwner) {
+        const editBtn = document.getElementById(`btn-edit-${pin.id}`);
+        if (editBtn) editBtn.onclick = (e) => { e.stopPropagation(); onEdit(pin); };
+      }
+      const likeBtn = document.getElementById(`btn-like-${pin.id}`);
+      if (likeBtn) likeBtn.onclick = (e) => { e.stopPropagation(); onLike(pin); };
+
+      const closeBtn = document.getElementById(`btn-close-${pin.id}`);
+      if (closeBtn) closeBtn.onclick = (e) => { e.stopPropagation(); setIsExpanded(false); };
     }
-  }, [isExpanded, isOwner, pin.id]);
+  }, [isExpanded, isOwner, pin.id, onEdit, onLike]);
 
   return (
     <Marker position={[pin.lat, pin.lng]} icon={icon} eventHandlers={{ click: (e) => { L.DomEvent.stopPropagation(e); setIsExpanded(!isExpanded); } }} />
   );
 };
 
-const MapPicker = ({ onPositionChange }: { onPositionChange: (latlng: [number, number]) => void }) => {
-  useMapEvents({ move: (e) => onPositionChange([e.target.getCenter().lat, e.target.getCenter().lng]) });
+const MapPicker = ({ onPositionChange, onCityChange }: { onPositionChange: (latlng: [number, number]) => void, onCityChange: (lat: number, lng: number) => void }) => {
+  useMapEvents({ 
+    move: (e) => {
+      const center = e.target.getCenter();
+      onPositionChange([center.lat, center.lng]);
+      onCityChange(center.lat, center.lng);
+    } 
+  });
+  return null;
+};
+
+const HeaderCityController = ({ onCityChange, center }: { onCityChange: (lat: number, lng: number) => void, center?: [number, number] }) => {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (center) {
+      map.setView(center, map.getZoom());
+    }
+  }, [center, map]);
+
+  useMapEvents({ 
+    moveend: (e) => {
+      const center = e.target.getCenter();
+      onCityChange(center.lat, center.lng);
+    } 
+  });
   return null;
 };
 
@@ -131,26 +173,90 @@ const App: React.FC = () => {
   const [aiPins, setAiPins] = useState<Pin[]>([]);
   const [isPickerActive, setIsPickerActive] = useState(false);
   const [pickerPos, setPickerPos] = useState<[number, number]>(FOGGIA_COORDS);
+  const [mapCenter, setMapCenter] = useState<[number, number]>(FOGGIA_COORDS);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSearchingAI, setIsSearchingAI] = useState(false);
   const [syncError, setSyncError] = useState(false);
   const [showShareToast, setShowShareToast] = useState(false);
+  const [isPremiumUser, setIsPremiumUser] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showApiKeyWarning, setShowApiKeyWarning] = useState(false);
   
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formText, setFormText] = useState('');
   const [formAddress, setFormAddress] = useState('');
   const [formType, setFormType] = useState<PinType>('visto');
   const [formDuration, setFormDuration] = useState(60); // minutes
+  const [cityCode, setCityCode] = useState('...');
+  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [wsStatus, setWsStatus] = useState<{ online: boolean, clients: number }>({ online: false, clients: 0 });
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+
+  const updateCityCode = useCallback((lat: number, lng: number) => {
+    const cities = [
+      { code: 'FG', name: 'Foggia', coords: [41.4622, 15.5447] },
+      { code: 'NA', name: 'Napoli', coords: [40.8518, 14.2681] },
+      { code: 'RM', name: 'Roma', coords: [41.9028, 12.4964] },
+      { code: 'MI', name: 'Milano', coords: [45.4642, 9.1899] },
+      { code: 'BA', name: 'Bari', coords: [41.1171, 16.8719] },
+      { code: 'TO', name: 'Torino', coords: [45.0703, 7.6869] },
+      { code: 'FI', name: 'Firenze', coords: [43.7696, 11.2558] },
+      { code: 'BO', name: 'Bologna', coords: [44.4949, 11.3426] },
+      { code: 'PA', name: 'Palermo', coords: [38.1157, 13.3615] },
+      { code: 'CT', name: 'Catania', coords: [37.5079, 15.0830] },
+    ];
+
+    let closest = cities[0];
+    let minDist = Infinity;
+
+    cities.forEach(c => {
+      const d = Math.sqrt(Math.pow(lat - c.coords[0], 2) + Math.pow(lng - c.coords[1], 2));
+      if (d < minDist) {
+        minDist = d;
+        closest = c;
+      }
+    });
+
+    if (minDist < 0.3) {
+      setCityCode(closest.code);
+    } else {
+      setCityCode('??');
+    }
+  }, []);
 
   useEffect(() => {
+    if (errorToast) {
+      const timer = setTimeout(() => setErrorToast(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [errorToast]);
+
+  const requestLocation = () => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        const { latitude, longitude } = position.coords;
+        setMapCenter([latitude, longitude]);
+        setPickerPos([latitude, longitude]);
+        updateCityCode(latitude, longitude);
+      }, (err) => {
+        alert("Impossibile ottenere la posizione. Controlla i permessi del browser.");
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (!process.env.GEMINI_API_KEY) {
+      setShowApiKeyWarning(true);
+    }
+    requestLocation();
     const fetchPins = async () => {
       setIsSyncing(true);
       try {
-        const { data, error } = await supabase.from('pins').select('*');
-        if (error) throw error;
-        if (data) setPins(data as Pin[]);
+        const res = await fetch('/api/pins');
+        const data = await res.json();
+        setPins(data as Pin[]);
         setSyncError(false);
       } catch (err) {
         setSyncError(true);
@@ -159,18 +265,60 @@ const App: React.FC = () => {
       }
     };
     fetchPins();
-    const channel = supabase.channel('public:pins').on('postgres_changes', { event: '*', schema: 'public', table: 'pins' }, (payload) => {
-      if (payload.eventType === 'INSERT') setPins(curr => [...curr, payload.new as Pin]);
-      else if (payload.eventType === 'UPDATE') setPins(curr => curr.map(p => p.id === payload.new.id ? (payload.new as Pin) : p));
-      else if (payload.eventType === 'DELETE') setPins(curr => curr.filter(p => p.id !== payload.old.id));
-    }).subscribe();
-    return () => { supabase.removeChannel(channel); };
+
+    // Setup WebSocket
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(`${protocol}//${window.location.host}`);
+    
+    socket.onopen = () => {
+      console.log('Connected to Pulse Stream');
+      setSyncError(false);
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'STATUS') {
+          setWsStatus({ online: true, clients: data.payload.clients });
+        } else if (data.type === 'INSERT') {
+          setPins(curr => {
+            if (curr.find(p => p.id === data.payload.id)) return curr;
+            return [...curr, data.payload as Pin];
+          });
+        } else if (data.type === 'UPDATE') {
+          setPins(curr => curr.map(p => p.id === data.payload.id ? (data.payload as Pin) : p));
+        } else if (data.type === 'DELETE') {
+          setPins(curr => curr.filter(p => p.id !== data.payload.id));
+        }
+      } catch (e) {
+        console.error('WS Parse Error', e);
+      }
+    };
+
+    socket.onclose = () => {
+      console.log('Disconnected from Pulse Stream');
+      setSyncError(true);
+    };
+
+    setWs(socket);
+    return () => { socket.close(); };
   }, []);
 
-  const refreshLiveFeed = useCallback(async () => {
+  const lastFetchRef = React.useRef<{ pos: [number, number], time: number }>({ pos: [0, 0], time: 0 });
+
+  const refreshLiveFeed = useCallback(async (force = false) => {
+    const now = Date.now();
+    const dist = Math.sqrt(Math.pow(mapCenter[0] - lastFetchRef.current.pos[0], 2) + Math.pow(mapCenter[1] - lastFetchRef.current.pos[1], 2));
+    
+    // Only auto-fetch if moved significantly (> 5km approx) and at least 2 minutes passed
+    // Or if forced (manual button)
+    if (!force && now - lastFetchRef.current.time < 120000 && dist < 0.05) {
+      return;
+    }
+
     setIsSearchingAI(true);
     try {
-      const liveSignals = await fetchRealTimeCitySignals();
+      const liveSignals = await fetchRealTimeCitySignals(mapCenter[0], mapCenter[1], cityCode);
       const mapped = liveSignals.map((s, i) => ({
         ...s,
         id: `ai-news-${Date.now()}-${i}`,
@@ -179,23 +327,30 @@ const App: React.FC = () => {
         emoji: '📢',
         isLive: true,
         reactions: { like: Math.floor(Math.random()*50), heart: 10, comment: 5 },
-        tags: ["#livenews", "#foggia"],
+        tags: ["#livenews", `#${cityCode.toLowerCase()}`],
         rotation: Math.random() * 6 - 3
       } as Pin));
       setAiPins(mapped);
-    } catch (e) {
+      lastFetchRef.current = { pos: mapCenter, time: now };
+    } catch (e: any) {
       console.warn("Live Feed non disponibile");
+      if (e?.message?.includes('429')) {
+        setErrorToast("Quota AI esaurita. Riprova tra un po'.");
+      }
     } finally {
       setIsSearchingAI(false);
     }
-  }, []);
+  }, [mapCenter, cityCode]);
 
-  useEffect(() => { refreshLiveFeed(); }, [refreshLiveFeed]);
+  useEffect(() => { 
+    // Initial fetch on mount or when city changes significantly
+    refreshLiveFeed(); 
+  }, [refreshLiveFeed]);
 
   const handleSimulateFromChat = async (scenario: string) => {
     setIsSearchingAI(true);
     try {
-      const simulated = await generateSimulatedPins(scenario);
+      const simulated = await generateSimulatedPins(scenario, mapCenter[0], mapCenter[1], cityCode);
       const mapped = simulated.map((s, i) => ({
         ...s,
         id: `sim-${Date.now()}-${i}`,
@@ -214,9 +369,28 @@ const App: React.FC = () => {
     }
   };
 
+  const handleLike = (pin: Pin) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const updatedPin = {
+        ...pin,
+        reactions: {
+          ...pin.reactions,
+          like: (pin.reactions.like || 0) + 1
+        }
+      };
+      ws.send(JSON.stringify({ type: 'UPDATE', payload: updatedPin }));
+    }
+  };
+
   const handleSave = async () => {
     if (!formText.trim() || !formAddress.trim()) return;
     
+    // Check if duration is premium (e.g. 24h)
+    if (formDuration > 360 && !isPremiumUser) {
+      setShowAuthModal(true);
+      return;
+    }
+
     const expiresAt = new Date(Date.now() + formDuration * 60000).toISOString();
     
     const pinData = {
@@ -239,11 +413,18 @@ const App: React.FC = () => {
       rotation: Math.random() * 8 - 4
     };
     try {
-      if (editingId) await supabase.from('pins').update(pinData).eq('id', editingId);
-      else await supabase.from('pins').insert([pinData]);
-      setIsModalOpen(false);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        if (editingId) {
+          ws.send(JSON.stringify({ type: 'UPDATE', payload: pinData }));
+        } else {
+          ws.send(JSON.stringify({ type: 'INSERT', payload: pinData }));
+        }
+        setIsModalOpen(false);
+      } else {
+        alert("Errore: Connessione al server persa.");
+      }
     } catch (err) {
-      alert("Errore salvataggio Supabase.");
+      alert("Errore salvataggio Pulse.");
     }
   };
 
@@ -269,37 +450,76 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#0a0a0a] text-white overflow-hidden font-mono">
+      {showApiKeyWarning && (
+        <div className="fixed bottom-24 right-6 z-[3000] bg-orange-500 text-white p-4 rounded-lg shadow-2xl max-w-xs border border-white/20">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-lg">⚠️</span>
+            <span className="font-bold text-[10px] uppercase tracking-widest">AI Offline</span>
+          </div>
+          <p className="text-[9px] leading-tight opacity-90">
+            La chiave Gemini API non è configurata. Le funzioni di ricerca news e simulazione non funzioneranno.
+          </p>
+          <button onClick={() => setShowApiKeyWarning(false)} className="mt-3 w-full py-1 bg-white/20 hover:bg-white/30 rounded text-[8px] font-bold uppercase">Chiudi</button>
+        </div>
+      )}
       {showShareToast && (
         <div className="fixed top-20 right-6 z-[3000] bg-[#00ff41] text-black px-4 py-2 rounded shadow-2xl font-bold text-[10px] animate-bounce">
           LINK COPIATO! INVIALO AI TUOI AMICI 🚀
         </div>
       )}
-      <header className="h-16 bg-black border-b border-white/10 z-[1000] flex items-center justify-between px-6">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-[#00ff41] rounded flex items-center justify-center text-black font-black text-xl shadow-[0_0_15px_rgba(0,255,65,0.4)]">
-            F
-          </div>
-          <div>
-            <h1 className="font-black text-lg tracking-tighter uppercase italic">Foggia <span className="text-[#00ff41]">Live Pulse</span></h1>
+      <header className="h-16 bg-[#151619] border-b border-white/5 z-[1000] flex items-center justify-between px-6 shadow-2xl">
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col">
             <div className="flex items-center gap-2">
-              <div className={`w-1.5 h-1.5 rounded-full ${syncError ? 'bg-red-500' : (isSyncing ? 'bg-yellow-400 animate-pulse' : 'bg-[#00ff41]')}`}></div>
-              <p className="text-[7px] uppercase tracking-widest font-bold text-white/40">
-                {syncError ? 'Offline' : (isSyncing ? 'Syncing...' : 'Live Feed Active')}
-              </p>
+              <div className="w-2 h-2 rounded-full bg-[#00ff41] shadow-[0_0_8px_#00ff41]"></div>
+              <h1 className="font-black text-xl tracking-tighter uppercase italic text-white">LIVE<span className="text-[#00ff41]">PIN</span></h1>
+            </div>
+            <span className="text-[7px] uppercase tracking-[0.3em] font-bold text-white/30">Hyper-Local Pulse Network</span>
+          </div>
+          
+          <div className="h-8 w-px bg-white/10"></div>
+          
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col">
+              <span className="text-[7px] uppercase font-bold text-white/40">Location</span>
+              <span className="text-[10px] font-black text-[#00ff41]">{cityCode}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[7px] uppercase font-bold text-white/40">Status</span>
+              <span className={`text-[10px] font-black ${wsStatus.online ? 'text-[#00ff41]' : 'text-red-500'}`}>
+                {wsStatus.online ? 'CONNECTED' : 'OFFLINE'}
+              </span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[7px] uppercase font-bold text-white/40">Nodes</span>
+              <span className="text-[10px] font-black text-white/60">{wsStatus.clients}</span>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button onClick={handleShare} className="hidden md:flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded transition-all">
-            <span className="text-xs">🔗</span>
-            <span className="text-[9px] font-bold uppercase tracking-widest">Share Pulse</span>
-          </button>
-          <div className="hidden md:flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded border border-white/10">
-            <img src={myIdentity.avatar} className="w-5 h-5 rounded-full" />
-            <span className="text-[9px] font-bold text-white/60">{myIdentity.name}</span>
+        
+        <div className="flex items-center gap-4">
+          <div className="hidden md:flex items-center gap-3 bg-white/5 border border-white/10 px-4 py-2 rounded-lg">
+            <img src={myIdentity.avatar} className="w-5 h-5 rounded-full ring-1 ring-[#00ff41]/30" />
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1">
+                <span className="text-[8px] font-bold text-white/80 leading-none">{myIdentity.name}</span>
+                {isPremiumUser && <span className="text-[6px] bg-[#00ff41] text-black px-1 rounded font-black">PRO</span>}
+              </div>
+              <span className="text-[6px] font-bold text-white/30 uppercase tracking-widest">Operator</span>
+            </div>
+            {!isPremiumUser && (
+              <button 
+                onClick={() => setShowAuthModal(true)} 
+                className="ml-2 text-[7px] font-bold text-[#00ff41] border border-[#00ff41]/30 px-2 py-1 rounded hover:bg-[#00ff41]/10 transition-all"
+              >
+                UPGRADE
+              </button>
+            )}
           </div>
-          <button onClick={() => setIsAIOpen(true)} className="bg-[#00ff41] text-black px-4 py-2 rounded font-bold text-[9px] uppercase tracking-widest hover:brightness-110 transition-all">
-            AI Pulse
+          
+          <button onClick={() => setIsAIOpen(true)} className="group relative px-6 py-2 bg-[#00ff41] text-black font-black text-[10px] uppercase tracking-widest rounded overflow-hidden transition-all hover:scale-105 active:scale-95">
+            <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform"></div>
+            <span className="relative">AI Terminal</span>
           </button>
         </div>
       </header>
@@ -331,13 +551,52 @@ const App: React.FC = () => {
         </aside>
 
         <div className="flex-1 relative">
-          <MapContainer center={FOGGIA_COORDS} zoom={15} zoomControl={false} style={{ height: '100%', width: '100%', background: '#000' }}>
+          <MapContainer center={mapCenter} zoom={15} zoomControl={false} style={{ height: '100%', width: '100%', background: '#000' }}>
             <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-            {isPickerActive && <MapPicker onPositionChange={setPickerPos} />}
+            <HeaderCityController onCityChange={updateCityCode} center={mapCenter} />
+            {isPickerActive && <MapPicker onPositionChange={setPickerPos} onCityChange={updateCityCode} />}
             {allVisiblePins.map(pin => (
-              <PostItMarker key={pin.id} pin={pin} isOwner={pin.authorId === myIdentity.token} onEdit={(p) => { setEditingId(p.id); setFormText(p.text); setFormAddress(p.address); setFormType(p.type); setIsModalOpen(true); }} />
+              <PostItMarker 
+                key={pin.id} 
+                pin={pin} 
+                isOwner={pin.authorId === myIdentity.token} 
+                onEdit={(p) => { setEditingId(p.id); setFormText(p.text); setFormAddress(p.address); setFormType(p.type); setIsModalOpen(true); }} 
+                onLike={handleLike}
+              />
             ))}
+
+            {isPickerActive && (
+              <div className="absolute inset-0 pointer-events-none z-[2000] flex items-center justify-center">
+                <div className="relative">
+                  <div className="w-8 h-8 border-2 border-[#00ff41] rounded-full animate-pulse"></div>
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-[#00ff41] rounded-full"></div>
+                  <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 bg-black/80 text-[#00ff41] text-[8px] font-bold px-2 py-1 rounded whitespace-nowrap border border-[#00ff41]/20">
+                    SPOSTA LA MAPPA PER POSIZIONARE IL PIN
+                  </div>
+                </div>
+              </div>
+            )}
           </MapContainer>
+
+          <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
+            <button onClick={requestLocation} className="w-10 h-10 bg-black/80 border border-white/20 rounded-full flex items-center justify-center text-white shadow-xl hover:bg-black transition-all" title="La mia posizione">
+              📍
+            </button>
+            <button 
+              onClick={() => refreshLiveFeed(true)} 
+              disabled={isSearchingAI}
+              className={`w-10 h-10 bg-black/80 border border-white/20 rounded-full flex items-center justify-center text-white shadow-xl hover:bg-black transition-all ${isSearchingAI ? 'animate-spin opacity-50' : ''}`}
+              title="Cerca News AI in questa zona"
+            >
+              {isSearchingAI ? '⌛' : '🔍'}
+            </button>
+          </div>
+
+          {errorToast && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[2000] bg-red-600 text-white px-4 py-2 rounded-full shadow-2xl font-bold text-xs animate-bounce">
+              ⚠️ {errorToast}
+            </div>
+          )}
 
           <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-sm">
             {!isPickerActive ? (
@@ -352,7 +611,14 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      <AIPanel isOpen={isAIOpen} onClose={() => setIsAIOpen(false)} onSimulatePins={handleSimulateFromChat} />
+      <AIPanel 
+        isOpen={isAIOpen} 
+        onClose={() => setIsAIOpen(false)} 
+        onSimulatePins={handleSimulateFromChat} 
+        lat={mapCenter[0]}
+        lng={mapCenter[1]}
+        cityCode={cityCode}
+      />
 
       {isModalOpen && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
@@ -368,10 +634,18 @@ const App: React.FC = () => {
               </div>
               
               <div className="space-y-2">
-                <label className="text-[8px] uppercase tracking-widest text-white/40 font-bold">Duration (Ephemeral)</label>
+                <div className="flex justify-between items-center">
+                  <label className="text-[8px] uppercase tracking-widest text-white/40 font-bold">Duration (Ephemeral)</label>
+                  {isPremiumUser && <span className="text-[7px] bg-[#00ff41]/20 text-[#00ff41] px-1 rounded font-bold uppercase">Premium Active</span>}
+                </div>
                 <div className="flex gap-2">
                   {[30, 60, 360, 1440].map(mins => (
-                    <button key={mins} onClick={() => setFormDuration(mins)} className={`flex-1 py-2 text-[9px] font-bold border rounded transition-all ${formDuration === mins ? 'border-[#00ff41] text-[#00ff41] bg-[#00ff41]/10' : 'border-white/10 text-white/40'}`}>
+                    <button 
+                      key={mins} 
+                      onClick={() => setFormDuration(mins)} 
+                      className={`flex-1 py-2 text-[9px] font-bold border rounded transition-all relative overflow-hidden ${formDuration === mins ? 'border-[#00ff41] text-[#00ff41] bg-[#00ff41]/10' : 'border-white/10 text-white/40'}`}
+                    >
+                      {mins === 1440 && !isPremiumUser && <span className="absolute top-0 right-0 bg-orange-500 text-white text-[5px] px-1 font-black">PRO</span>}
                       {mins < 60 ? `${mins}m` : `${mins/60}h`}
                     </button>
                   ))}
@@ -385,6 +659,34 @@ const App: React.FC = () => {
                 <button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-white/40 text-[10px] uppercase">Discard</button>
                 <button onClick={handleSave} className="flex-[3] py-4 bg-[#00ff41] text-black font-bold rounded shadow-xl hover:brightness-110 transition-all active:scale-95 uppercase text-[10px] tracking-widest">Transmit</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
+          <div className="bg-[#111] border border-[#00ff41]/30 p-10 w-full max-w-md shadow-[0_0_50px_rgba(0,255,65,0.1)] text-center">
+            <div className="w-16 h-16 bg-[#00ff41]/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-[#00ff41]/20">
+              <span className="text-2xl">💎</span>
+            </div>
+            <h3 className="text-xl font-black text-white uppercase tracking-tighter mb-2 italic">Premium Required</h3>
+            <p className="text-white/60 text-xs mb-8 leading-relaxed">
+              I pin che durano più di 6 ore sono riservati agli utenti verificati. 
+              Accedi per sbloccare la durata di 24 ore e altre funzioni pro.
+            </p>
+            <div className="space-y-3">
+              <button 
+                onClick={() => { setIsPremiumUser(true); setShowAuthModal(false); handleSave(); }} 
+                className="w-full py-4 bg-[#00ff41] text-black font-black uppercase text-[10px] tracking-[0.2em] rounded shadow-lg hover:scale-[1.02] transition-all"
+              >
+                Accedi / Diventa Pro
+              </button>
+              <button 
+                onClick={() => setShowAuthModal(false)} 
+                className="w-full py-4 text-white/40 font-bold uppercase text-[10px] tracking-widest"
+              >
+                Continua come ospite
+              </button>
             </div>
           </div>
         </div>

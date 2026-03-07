@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Foggia Live Pulse — ORA in città</title>
+    <title>PIN — livepinforcommunity</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <style>
@@ -22,12 +22,13 @@
       /* Animazione post-it espanso */
       @keyframes expandPostIt {
         from { transform: scale(0.3) translateY(0); opacity: 0; }
-        to { transform: scale(1) translateY(-60px); opacity: 1; }
+        to { transform: scale(1) translateY(-20px); opacity: 1; }
       }
       
       .expanded-postit {
-        animation: expandPostIt 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        animation: expandPostIt 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
         z-index: 9999 !important;
+        pointer-events: auto !important;
       }
 
       /* Pin 3D Style */
@@ -40,11 +41,18 @@
         cursor: pointer;
         transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         position: relative;
+        animation: pinPulse 2s infinite;
+      }
+      @keyframes pinPulse {
+        0% { transform: rotate(-45deg) scale(1); box-shadow: 0 0 0 0 rgba(0,255,65,0.4); }
+        70% { transform: rotate(-45deg) scale(1.1); box-shadow: 0 0 0 10px rgba(0,255,65,0); }
+        100% { transform: rotate(-45deg) scale(1); box-shadow: 0 0 0 0 rgba(0,255,65,0); }
       }
       .pin-3d:hover {
-        transform: rotate(-45deg) scale(1.5);
+        transform: rotate(-45deg) scale(1.5) !important;
         z-index: 1000;
         box-shadow: 0 0 20px rgba(0,255,65,0.5);
+        animation: none;
       }
 
       .leaflet-container {
