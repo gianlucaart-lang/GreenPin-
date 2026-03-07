@@ -362,8 +362,13 @@ const App: React.FC = () => {
         rotation: Math.random() * 10 - 5
       } as Pin));
       setAiPins(prev => [...prev, ...mapped]);
-    } catch (e) {
-      console.error("Simulation error");
+    } catch (e: any) {
+      console.error("Simulation error", e);
+      if (JSON.stringify(e).toLowerCase().includes('429') || JSON.stringify(e).toLowerCase().includes('quota')) {
+        setErrorToast("Limite AI raggiunto. Attendi un minuto.");
+      } else {
+        setErrorToast("Errore durante la simulazione AI.");
+      }
     } finally {
       setIsSearchingAI(false);
     }
