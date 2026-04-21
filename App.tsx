@@ -319,7 +319,7 @@ const App: React.FC = () => {
     setIsSearchingAI(true);
     try {
       const liveSignals = await fetchRealTimeCitySignals(mapCenter[0], mapCenter[1], cityCode);
-      const mapped = liveSignals.map((s, i) => ({
+      const mapped = liveSignals.map((s: any, i: number) => ({
         ...s,
         id: `ai-news-${Date.now()}-${i}`,
         authorId: 'system-ai',
@@ -333,9 +333,13 @@ const App: React.FC = () => {
       setAiPins(mapped);
       lastFetchRef.current = { pos: mapCenter, time: now };
     } catch (e: any) {
-      console.warn("Live Feed non disponibile");
-      if (e?.message?.includes('429')) {
-        setErrorToast("Quota AI esaurita. Riprova tra un po'.");
+      console.warn("Live Feed error", e);
+      if (e?.message === "API_KEY_INVALID") {
+        setErrorToast("CHIAVE API NON VALIDA: Controlla GEMINI_API_KEY su Render.");
+      } else if (JSON.stringify(e).toLowerCase().includes('429') || JSON.stringify(e).toLowerCase().includes('quota')) {
+        setErrorToast("Quota AI esaurita. Riprova tra poco.");
+      } else {
+        setErrorToast("Servizio News AI momentaneamente non disponibile.");
       }
     } finally {
       setIsSearchingAI(false);
@@ -351,7 +355,7 @@ const App: React.FC = () => {
     setIsSearchingAI(true);
     try {
       const simulated = await generateSimulatedPins(scenario, mapCenter[0], mapCenter[1], cityCode);
-      const mapped = simulated.map((s, i) => ({
+      const mapped = simulated.map((s: any, i: number) => ({
         ...s,
         id: `sim-${Date.now()}-${i}`,
         authorId: 'system-ai',
@@ -364,8 +368,10 @@ const App: React.FC = () => {
       setAiPins(prev => [...prev, ...mapped]);
     } catch (e: any) {
       console.error("Simulation error", e);
-      if (JSON.stringify(e).toLowerCase().includes('429') || JSON.stringify(e).toLowerCase().includes('quota')) {
-        setErrorToast("Limite AI raggiunto. Attendi un minuto.");
+      if (e?.message === "API_KEY_INVALID") {
+        setErrorToast("CHIAVE API NON VALIDA: Controlla GEMINI_API_KEY.");
+      } else if (JSON.stringify(e).toLowerCase().includes('429') || JSON.stringify(e).toLowerCase().includes('quota')) {
+        setErrorToast("Limite AI raggiunto. Attendi un momento.");
       } else {
         setErrorToast("Errore durante la simulazione AI.");
       }

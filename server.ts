@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleGenAI, Type } from "@google/genai";
+import { createClient } from "@supabase/supabase-js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,24 +23,40 @@ console.log("Starting PIN Server...");
 console.log("NODE_ENV:", process.env.NODE_ENV);
 
 const PORT = 3000;
-const DATA_DIR = path.resolve("./data");
-const PINS_FILE = path.join(DATA_DIR, "pins.json");
 
-// Assicurati che la cartella data esista
-fs.mkdirSync(DATA_DIR, { recursive: true });
+// Configurazione Supabase
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''; // Usa Service Role per CRUD illimitato sul server
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+
+if (!supabase) {
+  console.warn("⚠️ [SUPABASE] Credenziali mancanti. I dati non saranno persistenti su database.");
+}
 
 // Carica i pin iniziali
 let pins: any[] = [];
-if (fs.existsSync(PINS_FILE)) {
+
+async function loadPinsFromSupabase() {
+  if (!supabase) return;
   try {
-    pins = JSON.parse(fs.readFileSync(PINS_FILE, "utf-8"));
-  } catch (e) {
-    pins = [];
+    const { data, error } = await supabase.from('pins').select('*');
+    if (error) throw error;
+    if (data) {
+      pins = data.map(p => ({
+        ...p,
+        reactions: p.reactions || { like: 0, heart: 0, comment: 0 },
+        tags: p.tags || []
+      }));
+      console.log(`✅ [SUPABASE] Caricati ${pins.length} pin dal database.`);
+    }
+  } catch (err) {
+    console.error("❌ [SUPABASE] Errore caricamento pin:", err);
   }
 }
 
 async function startServer() {
   console.log("startServer() called...");
+  await loadPinsFromSupabase();
   const app = express();
   app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`);
@@ -76,8 +93,8 @@ async function startServer() {
   });
 
   // News Collector
-  const collectNews = async () => {
-    console.log("📡 Avvio raccolta news iper-locali (Foggia)...");
+  const collectNews = async (retryCount = 0) => {
+    console.log(`📡 Avvio raccolta news iper-locali (Foggia)... (Tentativo ${retryCount + 1})`);
     if (!process.env.GEMINI_API_KEY) {
       console.warn("⚠️ GEMINI_API_KEY mancante, raccolta news annullata.");
       return;
@@ -86,7 +103,7 @@ async function startServer() {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-flash-latest",
         contents: `Trova le ultime notizie REALI, eventi di cronaca, allerte meteo o lavori stradali a Foggia (Puglia) pubblicate nelle ultime 24 ore. 
         Consulta ESCLUSIVAMENTE fonti attendibili come: FoggiaToday, L'Immediato, Stato Quotidiano, Foggia Città Aperta. 
         Per ogni notizia DEVI fornire:
@@ -153,23 +170,47 @@ async function startServer() {
         addedPins.push(pin);
       }
 
-      if (pins.length > 150) pins = pins.slice(-150);
-      savePins();
-      
-      // Notifica tutti i client dei nuovi pin
+        if (pins.length > 150) pins = pins.slice(-150);
+        
+        // Salvataggio su Supabase
+        if (supabase && addedPins.length > 0) {
+          try {
+            const { error } = await supabase.from('pins').insert(addedPins);
+            if (error) throw error;
+            console.log(`💾 [SUPABASE] ${addedPins.length} news salvate.`);
+          } catch (err) {
+            console.error("❌ [SUPABASE] Errore salvataggio news:", err);
+          }
+        }
+        
+        // Notifica tutti i client dei nuovi pin
       addedPins.forEach(p => broadcast({ type: "INSERT", payload: p }));
       
-    } catch (error) {
-      console.error("❌ Errore News Collector:", error);
+    } catch (error: any) {
+      const errorStr = JSON.stringify(error).toLowerCase();
+      
+      if (errorStr.includes("api_key_invalid") || errorStr.includes("api key not valid")) {
+        console.error("❌ ERRORE CRITICO NEWS COLLECTOR: La chiave GEMINI_API_KEY non è valida. L'integrazione AI è sospesa.");
+        return; // Don't retry if key is invalid
+      }
+
+      if ((errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) && retryCount < 3) {
+        const delay = Math.pow(2, retryCount) * 10000; // 10s, 20s, 40s - More aggressive backoff for background
+        console.warn(`⚠️ News Collector: Quota esaurita. Riprovo tra ${delay/1000}s... (Tentativo ${retryCount + 1})`);
+        setTimeout(() => collectNews(retryCount + 1), delay);
+      } else {
+        console.error("❌ Errore News Collector:", error);
+      }
     }
   };
 
   app.post("/api/collect-news", async (req, res) => {
+    // Si può ancora triggerare manualmente dal server se necessario
     await collectNews();
-    res.json({ status: "News collection triggered" });
+    res.json({ status: "News collection triggered manually on server" });
   });
 
-  // Avvio periodico
+  // Avvio periodico news collector (Server-side)
   setInterval(collectNews, 30 * 60 * 1000);
   setTimeout(collectNews, 3000);
 
@@ -184,21 +225,41 @@ async function startServer() {
     ws.on("message", (message) => {
       try {
         const data = JSON.parse(message.toString());
+        console.log(`📩 [WS] Messaggio ricevuto: ${data.type}`);
         
         if (data.type === "INSERT") {
           const newPin = data.payload;
           pins.push(newPin);
-          savePins();
+          console.log(`📍 [NUOVO PIN] Aggiunto da ${newPin.authorName}: ${newPin.text}`);
+          
+          if (supabase) {
+            supabase.from('pins').insert([newPin]).then(({ error }) => {
+              if (error) console.error("❌ [SUPABASE] Errore INSERT:", error);
+            });
+          }
+
           broadcast({ type: "INSERT", payload: newPin });
         } else if (data.type === "UPDATE") {
           const updatedPin = data.payload;
           pins = pins.map(p => p.id === updatedPin.id ? updatedPin : p);
-          savePins();
+          
+          if (supabase) {
+            supabase.from('pins').update(updatedPin).eq('id', updatedPin.id).then(({ error }) => {
+              if (error) console.error("❌ [SUPABASE] Errore UPDATE:", error);
+            });
+          }
+
           broadcast({ type: "UPDATE", payload: updatedPin });
         } else if (data.type === "DELETE") {
           const id = data.payload.id;
           pins = pins.filter(p => p.id !== id);
-          savePins();
+          
+          if (supabase) {
+            supabase.from('pins').delete().eq('id', id).then(({ error }) => {
+              if (error) console.error("❌ [SUPABASE] Errore DELETE:", error);
+            });
+          }
+
           broadcast({ type: "DELETE", payload: { id } });
         }
       } catch (e) {
@@ -216,10 +277,6 @@ async function startServer() {
     });
   }
 
-  function savePins() {
-    fs.writeFileSync(PINS_FILE, JSON.stringify(pins, null, 2));
-  }
-
   // Funzione di pulizia pin scaduti
   const pruneExpiredPins = () => {
     const now = new Date().getTime();
@@ -229,8 +286,14 @@ async function startServer() {
     
     if (expired.length > 0) {
       console.log(`🧹 Pulizia: rimossi ${expired.length} pin scaduti.`);
-      pins = pins.filter(p => !p.expiresAt || new Date(p.expiresAt).getTime() >= now);
-      savePins();
+      const expiredIds = expired.map(p => p.id);
+      pins = pins.filter(p => !expiredIds.includes(p.id));
+      
+      if (supabase) {
+        supabase.from('pins').delete().in('id', expiredIds).then(({ error }) => {
+          if (error) console.error("❌ [SUPABASE] Errore pulizia:", error);
+        });
+      }
       
       // Notifica i client della rimozione
       expired.forEach(p => broadcast({ type: "DELETE", payload: { id: p.id } }));

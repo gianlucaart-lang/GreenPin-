@@ -13,6 +13,13 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 4): Promise<T> {
     } catch (error: any) {
       lastError = error;
       const errorStr = JSON.stringify(error).toLowerCase();
+      
+      // Handle Invalid API Key (Do not retry)
+      if (errorStr.includes('api_key_invalid') || errorStr.includes('api key not valid')) {
+        console.error("❌ ERRORE CRITICO: La chiave GEMINI_API_KEY non è valida. Controlla le impostazioni su Render.");
+        throw new Error("API_KEY_INVALID");
+      }
+
       const isRateLimit = 
         error?.message?.includes('429') || 
         error?.status === 429 || 
@@ -22,7 +29,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 4): Promise<T> {
 
       if (isRateLimit && i < maxRetries - 1) {
         const delay = Math.pow(3, i) * 2000 + Math.random() * 1000;
-        console.warn(`Rate limit hit (429). Retrying in ${Math.round(delay)}ms... (Attempt ${i + 1}/${maxRetries})`);
+        console.warn(`⚠️ Quota raggiunta (429). Riprovo tra ${Math.round(delay)}ms... (Tentativo ${i + 1}/${maxRetries})`);
         await sleep(delay);
         continue;
       }
@@ -40,7 +47,7 @@ export const fetchRealTimeCitySignals = async (lat: number, lng: number, cityCod
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-flash-latest",
       contents: `Cerca notizie REALI, eventi, lavori in corso o allerte meteo vicino a queste coordinate: ${lat}, ${lng} (Codice Città: ${cityCode}). Trasformale in 5 oggetti JSON per la mappa. Includi per ogni notizia: testo breve, indirizzo approssimativo, coordinate lat/lng precise, authorName (es. 'News_${cityCode}'), expiresAt (ISO string, tra 6 e 24 ore da ora) e l'URL della fonte.`,
       config: {
         systemInstruction: SYSTEM_PROMPT + `\nSEI UN AGGREGATORE DI NEWS REALI PER LA CITTÀ ${cityCode}. Restituisci JSON puro.`,
@@ -90,7 +97,7 @@ export const chatWithAI = async (message: string, history: { role: 'user' | 'bot
     }));
 
     const chat = ai.chats.create({
-      model: 'gemini-3.1-pro-preview',
+      model: 'gemini-flash-latest',
       config: {
         systemInstruction: SYSTEM_PROMPT + `\nTi trovi ad operare sulla mappa di ${cityCode} (Coordinate: ${lat}, ${lng}). Rispondi in modo iper-locale e rapido.`,
       },
@@ -112,7 +119,7 @@ export const generateSimulatedPins = async (scenario: string, lat: number, lng: 
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-preview",
+      model: "gemini-flash-latest",
       contents: `Genera 5 impulsi simulati vicino a ${lat}, ${lng} (Città: ${cityCode}) basati su questo scenario: ${scenario}. Ogni impulso deve avere un expiresAt (ISO) tra 30 min e 6 ore da ora.`,
       config: {
         systemInstruction: SYSTEM_PROMPT + `\nTi trovi ad operare sulla mappa di ${cityCode}.`,
